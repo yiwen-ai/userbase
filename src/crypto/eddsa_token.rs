@@ -159,22 +159,8 @@ impl Token {
         }
     }
 
-    pub fn validate(&self, expected_iss: String, expected_aud: xid::Id) -> anyhow::Result<()> {
-        if self.iss != expected_iss {
-            return Err(anyhow::Error::msg(format!(
-                "invalid issuer, expected {}, got {}",
-                expected_iss, self.iss
-            )));
-        }
-
-        if self.app != expected_aud {
-            return Err(anyhow::Error::msg(format!(
-                "invalid audience, expected {}, got {}",
-                expected_aud, self.app
-            )));
-        }
-
-        let now = unix_ms() as i64;
+    pub fn validate(&self) -> anyhow::Result<()> {
+        let now = (unix_ms() / 1000) as i64;
         if self.exp < now - CLOCK_SKEW {
             return Err(anyhow::Error::msg("token expired"));
         }

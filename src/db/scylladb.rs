@@ -149,7 +149,7 @@ pub fn extract_applied(res: QueryResult) -> bool {
 }
 
 pub async fn exec_cqls(db: &ScyllaDB, cqls: &str) -> anyhow::Result<()> {
-    let mut lines = cqls.lines();
+    let lines = cqls.lines();
     let mut cql = String::new();
     let mut cqls: Vec<String> = Vec::new();
     for line in lines {
@@ -189,8 +189,6 @@ mod tests {
     use crate::db;
     use tokio::sync::OnceCell;
 
-    
-
     static DB: OnceCell<db::scylladb::ScyllaDB> = OnceCell::const_new();
 
     async fn get_db() -> &'static db::scylladb::ScyllaDB {
@@ -203,7 +201,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    // #[ignore]
     async fn exec_cqls_works() -> anyhow::Result<()> {
         let db = get_db().await;
         db.init_tables_for_test().await?;

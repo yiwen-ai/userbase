@@ -1,5 +1,9 @@
 use axum::{
     extract::{Query, State},
+    headers::{
+        authorization::{Bearer, Credentials},
+    },
+    http::HeaderMap,
     Extension,
 };
 use serde::{Deserialize, Serialize};
@@ -9,7 +13,6 @@ use validator::Validate;
 use axum_web::context::{unix_ms, ReqContext};
 use axum_web::erring::{HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
-
 
 use crate::api::{AppState, QuerySid};
 use crate::crypto;
@@ -281,9 +284,7 @@ pub async fn renew_token(
                 vec!["uid".to_string(), "expire_at".to_string()],
             )
             .await
-            .map_err(|e| {
-                HTTPError::new(401, format!("Invalid authorization, {}", e))
-            })?;
+            .map_err(|e| HTTPError::new(401, format!("Invalid authorization, {}", e)))?;
         if authz.uid != uid {
             return Err(HTTPError::new(
                 500,
@@ -475,4 +476,152 @@ pub async fn get(
         .collect();
     doc.get_one(&app.scylla, fields).await?;
     Ok(to.with(SuccessResponse::new(SessionOutput::from(doc, &to))))
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct TokenVerifyOutput {
+    pub uid: PackObject<xid::Id>,
+    pub aid: PackObject<xid::Id>,
+    pub oid: PackObject<uuid::Uuid>,
+    pub scope: String,
+    pub status: i8,
+    pub rating: i8,
+    pub kind: i8,
+}
+
+pub async fn min_verify_token(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    headers: HeaderMap,
+) -> Result<PackObject<SuccessResponse<TokenVerifyOutput>>, HTTPError> {
+    let token = headers
+        .get("Authorization")
+        .ok_or_else(|| HTTPError::new(401, "Missing Authorization header".to_string()))?;
+
+    let token = Bearer::decode(token).ok_or_else(|| {
+        HTTPError::new(
+            401,
+            "Expected Bearer token on authorization header".to_string(),
+        )
+    })?;
+
+    let token = crypto::base64url_decode(token.token())
+        .map_err(|_| HTTPError::new(401, "Invalid token".to_string()))?;
+
+    let token = app
+        .cwt
+        .verify(&token)
+        .map_err(|_| HTTPError::new(401, "Invalid token".to_string()))?;
+
+    ctx.set_kvs(vec![
+        ("action", "min_verify_token".into()),
+        ("uid", token.uid.to_string().into()),
+        ("oid", token.user.to_string().into()),
+    ])
+    .await;
+
+    if let Err(err) = token.validate() {
+        return Err(HTTPError::new(401, err.to_string()));
+    }
+
+    let mut sess = db::Session::with_pk(token.sid);
+    sess.get_one(&app.scylla, vec!["ttl".to_string()])
+        .await
+        .map_err(|_| HTTPError::new(401, format!("Invalid session, {}", token.sid)))?;
+
+    Ok(to.with(SuccessResponse::new(TokenVerifyOutput {
+        uid: to.with(token.uid),
+        aid: to.with(token.app),
+        oid: to.with(token.user),
+        scope: token.scope,
+        status: token.status,
+        rating: token.rating,
+        kind: token.kind,
+    })))
+}
+
+pub async fn verify_token(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    headers: HeaderMap,
+) -> Result<PackObject<SuccessResponse<TokenVerifyOutput>>, HTTPError> {
+    let token = headers
+        .get("Authorization")
+        .ok_or_else(|| HTTPError::new(401, "Missing Authorization header".to_string()))?;
+
+    let token = Bearer::decode(token).ok_or_else(|| {
+        HTTPError::new(
+            401,
+            "Expected Bearer token on authorization header".to_string(),
+        )
+    })?;
+
+    let token = crypto::base64url_decode(token.token())
+        .map_err(|_| HTTPError::new(401, "Invalid token".to_string()))?;
+
+    let token = app
+        .cwt
+        .verify(&token)
+        .map_err(|_| HTTPError::new(401, "Invalid token".to_string()))?;
+
+    ctx.set_kvs(vec![
+        ("action", "min_verify_token".into()),
+        ("uid", token.uid.to_string().into()),
+        ("oid", token.user.to_string().into()),
+    ])
+    .await;
+
+    if let Err(err) = token.validate() {
+        return Err(HTTPError::new(401, err.to_string()));
+    }
+
+    let mut sess = db::Session::with_pk(token.sid);
+    sess.get_one(&app.scylla, vec!["ttl".to_string()])
+        .await
+        .map_err(|_| HTTPError::new(401, format!("Invalid session, {}", token.sid)))?;
+
+    let jarvis = xid::Id::from_str(db::USER_JARVIS).unwrap();
+    if token.app != jarvis {
+        let mut app_user = db::User::with_pk(token.app);
+        app_user
+            .get_one(&app.scylla, vec!["status".to_string()])
+            .await
+            .map_err(|_| HTTPError::new(403, format!("Invalid app {}", token.app)))?;
+        if app_user.status < 0 {
+            return Err(HTTPError::new(
+                403,
+                format!("{} app {}", app_user.status_name(), app_user.id),
+            ));
+        }
+    }
+
+    let mut user = db::User::with_pk(token.uid);
+    user.get_one(
+        &app.scylla,
+        vec![
+            "status".to_string(),
+            "rating".to_string(),
+            "kind".to_string(),
+        ],
+    )
+    .await
+    .map_err(|_| HTTPError::new(401, format!("Invalid user, {}", token.uid)))?;
+    if user.status < 0 {
+        return Err(HTTPError::new(
+            403,
+            format!("{} user, id {}", user.status_name(), user.id),
+        ));
+    }
+
+    Ok(to.with(SuccessResponse::new(TokenVerifyOutput {
+        uid: to.with(token.uid),
+        aid: to.with(token.app),
+        oid: to.with(token.user),
+        scope: token.scope,
+        status: user.status,
+        rating: user.rating,
+        kind: user.kind,
+    })))
 }

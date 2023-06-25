@@ -44,6 +44,11 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route("/min_verify", routing::post(api::session::min_verify))
                 .route("/verify", routing::post(api::session::verify))
                 .route("/renew_token", routing::post(api::session::renew_token))
+                .route(
+                    "/min_verify_token",
+                    routing::get(api::session::min_verify_token),
+                )
+                .route("/verify_token", routing::get(api::session::verify_token))
                 .route("/list", routing::get(api::session::list)),
         )
         .nest(
