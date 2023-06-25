@@ -16,7 +16,7 @@ pub static USER_ANON: &str = "000000000000000anon0"; // anonymous user
 static BASE_36: &str = "abcdefghijklmnopqrstuvwxyz0123456789";
 
 // length ~= 11, example: oiy5nx77xci
-pub fn xid_to_cn(id: xid::Id, delta: u8) -> String {
+pub fn xid_to_cn(id: &xid::Id, delta: u8) -> String {
     let id = id.as_bytes();
     let mut data = [id[11], id[10], id[9], id[0], id[1], id[2], id[3]];
     if delta > 0 {
@@ -36,15 +36,15 @@ mod tests {
     #[ignore]
     fn xid_to_cn_works() {
         assert_eq!(
-            xid_to_cn(xid::Id::from_str(USER_JARVIS).unwrap(), 0).as_str(),
+            xid_to_cn(&xid::Id::from_str(USER_JARVIS).unwrap(), 0).as_str(),
             "oiy5nx77xci"
         );
         assert_eq!(
-            xid_to_cn(xid::Id::from_str(USER_ANON).unwrap(), 0).as_str(),
+            xid_to_cn(&xid::Id::from_str(USER_ANON).unwrap(), 0).as_str(),
             "dvtzccgkw3m"
         );
         let id = xid::new();
-        assert_ne!(xid_to_cn(id, 0), xid_to_cn(id, 1));
-        assert_ne!(xid_to_cn(id, 0), xid_to_cn(xid::new(), 0));
+        assert_ne!(xid_to_cn(&id, 0), xid_to_cn(&id, 1));
+        assert_ne!(xid_to_cn(&id, 0), xid_to_cn(&xid::new(), 0));
     }
 }

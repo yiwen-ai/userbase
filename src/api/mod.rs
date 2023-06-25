@@ -8,8 +8,10 @@ use axum_web::object::PackObject;
 use crate::crypto;
 use crate::db;
 
+pub mod authn;
 pub mod group;
 pub mod member;
+pub mod session;
 pub mod user;
 // pub mod publication_draft;
 
@@ -79,6 +81,12 @@ pub struct QueryGidUid {
     pub gid: PackObject<xid::Id>,
     pub uid: PackObject<xid::Id>,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct QuerySid {
+    pub sid: PackObject<xid::Id>,
+    pub fields: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Validate)]

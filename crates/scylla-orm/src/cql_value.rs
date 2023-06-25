@@ -141,6 +141,18 @@ impl ToCqlVal for Vec<u8> {
     }
 }
 
+impl FromCqlVal for uuid::Uuid {
+    fn from_cql(cql_val: &CqlValue) -> Result<Self, FromCqlValError> {
+        cql_to_rust::FromCqlVal::from_cql(cql_val.to_owned())
+    }
+}
+
+impl ToCqlVal for uuid::Uuid {
+    fn to_cql(&self) -> CqlValue {
+        CqlValue::Uuid(self.to_owned())
+    }
+}
+
 impl FromCqlVal for CqlValue {
     fn from_cql(val: &CqlValue) -> Result<Self, FromCqlValError> {
         Ok(val.to_owned())

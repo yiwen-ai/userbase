@@ -35,6 +35,34 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
         .route("/", routing::get(api::version))
         .route("/healthz", routing::get(api::healthz))
         .nest(
+            "/v1/session",
+            Router::new()
+                .route(
+                    "/",
+                    routing::get(api::session::get).delete(api::session::delete),
+                )
+                .route("/min_verify", routing::post(api::session::min_verify))
+                .route("/verify", routing::post(api::session::verify))
+                .route("/renew_token", routing::post(api::session::renew_token))
+                .route("/list", routing::get(api::session::list)),
+        )
+        .nest(
+            "/v1/authn",
+            Router::new()
+                .route(
+                    "/",
+                    routing::get(api::authn::get).delete(api::authn::delete),
+                )
+                .route("/login_or_new", routing::post(api::authn::login_or_new))
+                .route("/list", routing::get(api::authn::list)),
+        )
+        .nest(
+            "/v1/oauth",
+            Router::new()
+                .route("/authorize", routing::get(todo))
+                .route("/access_token", routing::get(todo)),
+        )
+        .nest(
             "/v1/user",
             Router::new()
                 .route("/", routing::get(api::user::get).patch(api::user::update))
@@ -61,7 +89,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                     Router::new()
                         .route(
                             "/",
-                            routing::post(api::member::create).delete(api::member::create),
+                            routing::post(api::member::create).delete(api::member::delete),
                         )
                         .route("/update_role", routing::patch(api::member::update_role))
                         .route(
@@ -132,7 +160,7 @@ async fn new_app_state(cfg: conf::Conf) -> anyhow::Result<api::AppState> {
             aad,
             &fs::read_to_string(cfg.keys.token_key_file)?,
         )?;
-        crypto::Cwt::new(token_key.get_private()?, &token_key.key_id())
+        crypto::Cwt::new(token_key.get_private()?, &token_key.key_id(), aad)
     };
 
     let scylla = {

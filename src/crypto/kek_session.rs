@@ -14,11 +14,11 @@ impl Session {
     }
 
     pub fn session(&self, sid: &xid::Id, uid: &xid::Id, oid: Option<&uuid::Uuid>) -> String {
-        let data = if oid.is_some() {
+        let data = if let Some(oid) = oid {
             let mut buf: Vec<u8> = Vec::with_capacity(40);
             buf.extend_from_slice(sid.as_bytes());
             buf.extend_from_slice(uid.as_bytes());
-            buf.extend_from_slice(oid.unwrap().as_bytes());
+            buf.extend_from_slice(oid.as_bytes());
             buf
         } else {
             let mut buf: Vec<u8> = Vec::with_capacity(24);
@@ -28,7 +28,6 @@ impl Session {
         };
 
         let wrapped_data = self.kek.wrap_with_padding_vec(&data).unwrap();
-        println!("KEK: {} -> {}", data.len(), wrapped_data.len());
         Base64UrlUnpadded::encode_string(&wrapped_data)
     }
 

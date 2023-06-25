@@ -7,7 +7,7 @@ use crate::db::{scylladb, scylladb::extract_applied, xid_to_cn};
 
 #[derive(Debug, Default, Clone, CqlOrm)]
 pub struct GroupIndex {
-    pub cn: String,
+    pub cn: String, // should be lowercase
     pub id: xid::Id,
     pub created_at: i64,
     pub expire_at: i64,
@@ -44,7 +44,7 @@ impl GroupIndex {
         Ok(())
     }
 
-    pub async fn save(&mut self, db: &scylladb::ScyllaDB, expire_ms: i64) -> anyhow::Result<bool> {
+    async fn save(&mut self, db: &scylladb::ScyllaDB, expire_ms: i64) -> anyhow::Result<bool> {
         self._fields = Self::fields();
         let now = unix_ms() as i64;
         self.created_at = now;
@@ -60,7 +60,7 @@ impl GroupIndex {
         Ok(true)
     }
 
-    pub async fn update_expire(
+    async fn update_expire(
         &mut self,
         db: &scylladb::ScyllaDB,
         expire_at: i64,
@@ -98,7 +98,7 @@ impl GroupIndex {
         Ok(true)
     }
 
-    pub async fn reset_cn(&mut self, db: &scylladb::ScyllaDB, id: xid::Id) -> anyhow::Result<bool> {
+    async fn reset_cn(&mut self, db: &scylladb::ScyllaDB, id: xid::Id) -> anyhow::Result<bool> {
         self.get_one(db).await?;
         let now = unix_ms() as i64;
         if self.expire_at == 0 || self.expire_at + 1000 * 3600 * 24 * 365 > now {
@@ -139,7 +139,7 @@ impl GroupIndex {
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct Group {
     pub id: xid::Id,
-    pub cn: String,
+    pub cn: String, // should be lowercase
     pub status: i8,
     pub kind: i8,
     pub uid: xid::Id,
@@ -194,6 +194,17 @@ impl Group {
         }
 
         Ok(select_fields)
+    }
+
+    pub fn status_name(&self) -> String {
+        match self.status {
+            -2 => "Disabled".to_string(),
+            -1 => "Suspended".to_string(),
+            0 => "Normal".to_string(),
+            1 => "Verified".to_string(),
+            2 => "Protected".to_string(),
+            _ => "Unknown".to_string(),
+        }
     }
 
     pub fn valid_status(&self, status: i8) -> anyhow::Result<()> {
@@ -269,7 +280,7 @@ impl Group {
         let mut i: u8 = 0;
         let expire: i64 = 1000 * 3600 * 24 * 365 * 99; // default CN expire 99 years
         loop {
-            self.cn = xid_to_cn(self.id, i);
+            self.cn = xid_to_cn(&self.id, i);
 
             let mut index = GroupIndex::with_pk(self.cn.clone());
             index.id = self.id;

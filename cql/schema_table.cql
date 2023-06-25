@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS authn (
 CREATE INDEX authn_uid ON authn (uid);
 
 CREATE TABLE IF NOT EXISTS authz (
-    oid        TEXT,      -- user open id: BASE64URL(HMAC_256_256(uid + gid)[..16])
+    oid        UUID,      -- user open id, crate::crypto::MacId
     aid        BLOB,      -- app id is a robot user id who created by a group
     uid        BLOB,      -- user id
     created_at BIGINT,    -- create at, unix time, ms
@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS session (
     ip          TEXT,   -- last access ip
     created_at  BIGINT, -- updated at, unix time, ms
     updated_at  BIGINT, -- updated at, unix time, ms
+    ttl         INT,    -- ttl, seconds
     device_id   TEXT,
     device_desc TEXT,
     idp         TEXT,   -- provider for authn or group id for authz
@@ -137,8 +138,8 @@ CREATE TABLE IF NOT EXISTS session (
     PRIMARY KEY (id)
 ) WITH caching = {'enabled': 'true'}
     AND comment = 'user''s tokens index'
-    AND compaction = {'class': 'TimeWindowCompactionStrategy', 'compaction_window_size': 3}
+    AND compaction = {'class': 'TimeWindowCompactionStrategy', 'compaction_window_size': 7}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
-    AND default_time_to_live = 604800; -- 60*60*24*7, 604800，可以续期，id 不变 token 变
+    AND default_time_to_live = 2592000; -- 60*60*24*30，可以续期
 
 CREATE INDEX session_uid ON session (uid);

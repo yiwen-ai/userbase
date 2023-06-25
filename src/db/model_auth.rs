@@ -1,7 +1,4 @@
-
-use std::{
-    collections::HashSet,
-};
+use std::collections::HashSet;
 
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
@@ -12,6 +9,10 @@ use crate::db::{
     scylladb,
     scylladb::{extract_applied, Query},
 };
+
+const SESSION_TTL_DEFAULT: i32 = 3600 * 24 * 30; // 30 days
+const SESSION_TTL_MIN: i32 = 3600;
+const SESSION_TTL_MAX: i32 = 3600 * 24 * 400; // 400 days
 
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct AuthN {
@@ -51,8 +52,13 @@ impl AuthN {
             }
         }
 
+        let mut select_fields = select_fields;
+        let field = "uid".to_string();
+        if !select_fields.contains(&field) {
+            select_fields.push(field);
+        }
+
         if with_pk {
-            let mut select_fields = select_fields;
             let field = "idp".to_string();
             if !select_fields.contains(&field) {
                 select_fields.push(field);
@@ -147,20 +153,8 @@ impl AuthN {
             }
         }
 
-        self.get_one(db, vec!["uid".to_string()]).await?;
-        if self.uid != uid {
-            return Err(HTTPError::new(
-                409,
-                format!(
-                    "AuthN {}, {}, {} updated conflict, expected {}, got {}",
-                    self.idp, self.aid, self.oid, self.uid, uid
-                ),
-            )
-            .into());
-        }
-
         let mut set_fields: Vec<String> = Vec::with_capacity(update_fields.len() + 1);
-        let mut params: Vec<CqlValue> = Vec::with_capacity(update_fields.len() + 1 + 3);
+        let mut params: Vec<CqlValue> = Vec::with_capacity(update_fields.len() + 1 + 4);
 
         let new_updated_at = unix_ms() as i64;
         set_fields.push("updated_at=?".to_string());
@@ -172,12 +166,13 @@ impl AuthN {
         }
 
         let query = format!(
-            "UPDATE authn SET {} WHERE idp=? AND aid=? AND oid=? IF EXISTS",
+            "UPDATE authn SET {} WHERE idp=? AND aid=? AND oid=? IF uid=?",
             set_fields.join(",")
         );
         params.push(self.idp.to_cql());
         params.push(self.aid.to_cql());
         params.push(self.oid.to_cql());
+        params.push(uid.to_cql());
 
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
@@ -192,6 +187,45 @@ impl AuthN {
         }
 
         self.updated_at = new_updated_at;
+        Ok(true)
+    }
+
+    pub async fn delete(&mut self, db: &scylladb::ScyllaDB, uid: xid::Id) -> anyhow::Result<bool> {
+        let res = self.get_one(db, vec!["uid".to_string()]).await;
+        if res.is_err() {
+            return Ok(false); // already deleted
+        }
+
+        if self.uid != uid {
+            return Err(HTTPError::new(
+                409,
+                format!(
+                    "AuthN {}, {}, {} delete conflict, expected uid {}, got {}",
+                    self.idp, self.aid, self.oid, self.uid, uid
+                ),
+            )
+            .into());
+        }
+
+        let query = "DELETE FROM authn WHERE idp=? AND aid=? AND oid=? IF uid=?";
+        let params = (
+            self.idp.to_cql(),
+            self.aid.to_cql(),
+            self.oid.to_cql(),
+            uid.to_cql(),
+        );
+        let res = db.execute(query, params).await?;
+        if !extract_applied(res) {
+            return Err(HTTPError::new(
+                409,
+                format!(
+                    "AuthN {}, {}, {} delete failed, please try again",
+                    self.idp, self.aid, self.oid
+                ),
+            )
+            .into());
+        }
+
         Ok(true)
     }
 
@@ -226,7 +260,7 @@ impl AuthN {
 
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct AuthZ {
-    pub oid: String,
+    pub oid: uuid::Uuid,
     pub aid: xid::Id,
     pub uid: xid::Id,
     pub created_at: i64,
@@ -239,7 +273,7 @@ pub struct AuthZ {
 }
 
 impl AuthZ {
-    pub fn with_pk(oid: String, aid: xid::Id) -> Self {
+    pub fn with_pk(oid: uuid::Uuid, aid: xid::Id) -> Self {
         Self {
             oid,
             aid,
@@ -434,6 +468,7 @@ pub struct Session {
     pub ip: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub ttl: i32,
     pub device_id: String,
     pub device_desc: String,
     pub idp: String,
@@ -497,17 +532,24 @@ impl Session {
         Ok(())
     }
 
-    pub async fn save(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
+    pub async fn save(&mut self, db: &scylladb::ScyllaDB, ttl: i32) -> anyhow::Result<bool> {
         let now = unix_ms() as i64;
         self.created_at = now;
         self.updated_at = now;
+        self.ttl = if ttl < SESSION_TTL_MIN {
+            SESSION_TTL_DEFAULT
+        } else if ttl > SESSION_TTL_MAX {
+            SESSION_TTL_MAX
+        } else {
+            ttl
+        };
 
         let fields = Self::fields();
         self._fields = fields.clone();
 
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
-        let mut params: Vec<&CqlValue> = Vec::with_capacity(fields.len());
+        let mut params: Vec<&CqlValue> = Vec::with_capacity(fields.len() + 1);
         let cols = self.to();
 
         for field in &fields {
@@ -517,11 +559,13 @@ impl Session {
         }
 
         let query = format!(
-            "INSERT INTO session ({}) VALUES ({}) IF NOT EXISTS",
+            "INSERT INTO session ({}) VALUES ({}) USING TTL ? IF NOT EXISTS",
             cols_name.join(","),
             vals_name.join(",")
         );
 
+        let ttl = self.ttl.to_cql();
+        params.push(&ttl);
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
             return Err(HTTPError::new(
@@ -537,28 +581,49 @@ impl Session {
         Ok(true)
     }
 
-    pub async fn update_ip(
-        &mut self,
-        db: &scylladb::ScyllaDB,
-        ip: String,
-        uid: xid::Id,
-    ) -> anyhow::Result<bool> {
-        self.get_one(db, vec!["uid".to_string(), "ip".to_string()])
-            .await?;
-        if self.uid != uid {
+    pub async fn renew(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
+        self.get_one(db, vec![]).await?;
+
+        let now = unix_ms() as i64;
+        self.created_at = now; // renew time
+        self.updated_at = now;
+
+        let fields = self._fields.clone();
+        let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
+        let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
+        let mut params: Vec<&CqlValue> = Vec::with_capacity(fields.len() + 1);
+        let cols = self.to();
+
+        for field in &fields {
+            cols_name.push(field);
+            vals_name.push("?");
+            params.push(cols.get(field).unwrap());
+        }
+
+        let query = format!(
+            "INSERT INTO session ({}) VALUES ({}) USING TTL ? IF EXISTS",
+            cols_name.join(","),
+            vals_name.join(",")
+        );
+
+        let ttl = self.ttl.to_cql();
+        params.push(&ttl);
+        let res = db.execute(query, params).await?;
+        if !extract_applied(res) {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Session {} updated ip conflict, expected uid {}, got {}",
-                    self.id, self.uid, uid
+                    "Session {}, {} renew failed, please try again",
+                    self.id, self.uid
                 ),
             )
             .into());
         }
-        if self.ip == ip {
-            return Ok(false);
-        }
 
+        Ok(true)
+    }
+
+    pub async fn update_ip(&mut self, db: &scylladb::ScyllaDB, ip: String) -> anyhow::Result<bool> {
         let new_updated_at = unix_ms() as i64;
         let query = "UPDATE session SET ip=?,updated_at=? WHERE id=? IF EXISTS".to_string();
         let params = (ip, new_updated_at, self.id.to_cql());
@@ -573,6 +638,37 @@ impl Session {
         }
 
         self.updated_at = new_updated_at;
+        Ok(true)
+    }
+
+    pub async fn delete(&mut self, db: &scylladb::ScyllaDB, uid: xid::Id) -> anyhow::Result<bool> {
+        let res = self.get_one(db, vec!["uid".to_string()]).await;
+        if res.is_err() {
+            return Ok(false); // already deleted
+        }
+
+        if self.uid != uid {
+            return Err(HTTPError::new(
+                409,
+                format!(
+                    "Session {} delete conflict, expected uid {}, got {}",
+                    self.id, self.uid, uid
+                ),
+            )
+            .into());
+        }
+
+        let query = "DELETE FROM session WHERE id=? IF uid=?";
+        let params = (self.id.to_cql(), uid.to_cql());
+        let res = db.execute(query, params).await?;
+        if !extract_applied(res) {
+            return Err(HTTPError::new(
+                409,
+                format!("Session {} delete failed, please try again", self.id),
+            )
+            .into());
+        }
+
         Ok(true)
     }
 

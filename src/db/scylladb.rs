@@ -39,13 +39,42 @@ impl ScyllaDB {
             .build()
             .await?;
 
-        session.use_keyspace(keyspace, false).await?;
+        if !keyspace.is_empty() {
+            session.use_keyspace(keyspace, false).await?;
+        }
 
         Ok(Self { session })
     }
 
     pub fn metrics(&self) -> Arc<Metrics> {
         self.session.get_metrics()
+    }
+
+    #[cfg(test)]
+    pub async fn init_tables_for_test(&self) -> anyhow::Result<()> {
+        let schema = std::include_str!("../../cql/schema_keyspace_test.cql");
+        exec_cqls(self, schema).await?;
+
+        let schema = std::include_str!("../../cql/schema_table.cql");
+        exec_cqls(self, schema).await?;
+        Ok(())
+    }
+
+    #[cfg(any(cmd, test))]
+    pub async fn init_data(&self) -> anyhow::Result<()> {
+        let schema = std::include_str!("../../cql/init_data.cql");
+        exec_cqls(self, schema).await?;
+
+        Ok(())
+    }
+
+    pub async fn query(
+        &self,
+        query: impl Into<Query>,
+        params: impl ValueList,
+    ) -> anyhow::Result<QueryResult> {
+        let res = self.session.query(query, params).await?;
+        Ok(res)
     }
 
     pub async fn execute(
@@ -117,4 +146,68 @@ pub fn extract_applied(res: QueryResult) -> bool {
         .map(|r| r.columns[0].as_ref().and_then(|r| r.as_boolean()))
         .unwrap_or(Some(false));
     res == Some(true)
+}
+
+pub async fn exec_cqls(db: &ScyllaDB, cqls: &str) -> anyhow::Result<()> {
+    let mut lines = cqls.lines();
+    let mut cql = String::new();
+    let mut cqls: Vec<String> = Vec::new();
+    for line in lines {
+        let line = line.split("--").collect::<Vec<&str>>()[0].trim();
+        if line.is_empty() {
+            continue;
+        }
+        cql.push(' ');
+        cql.push_str(line);
+        if cql.ends_with(';') {
+            cqls.push(cql.trim().trim_end_matches(';').to_string());
+            cql.clear();
+        }
+    }
+
+    for cql in cqls {
+        let res = db
+            .query(cql.clone(), &[])
+            .await
+            .map_err(|err| anyhow::anyhow!("\ncql: {}\nerror: {}", &cql, &err));
+        if res.is_err() {
+            let res = res.unwrap_err();
+            if res.to_string().contains("Index already exists") {
+                println!("WARN: {}", res);
+            } else {
+                return Err(res);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::conf;
+    use crate::db;
+    use tokio::sync::OnceCell;
+
+    
+
+    static DB: OnceCell<db::scylladb::ScyllaDB> = OnceCell::const_new();
+
+    async fn get_db() -> &'static db::scylladb::ScyllaDB {
+        DB.get_or_init(|| async {
+            let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
+            let res = db::scylladb::ScyllaDB::new(cfg.scylla, "").await;
+            res.unwrap()
+        })
+        .await
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    // #[ignore]
+    async fn exec_cqls_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+        db.init_tables_for_test().await?;
+        db.init_data().await?;
+        Ok(())
+    }
 }

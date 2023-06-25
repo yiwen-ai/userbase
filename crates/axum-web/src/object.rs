@@ -160,6 +160,18 @@ impl Serialize for PackObject<isolang::Language> {
     }
 }
 
+impl Serialize for PackObject<uuid::Uuid> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            PackObject::Json(v) => serializer.serialize_str(v.to_string().as_str()),
+            PackObject::Cbor(v) => serializer.serialize_bytes(v.as_bytes()),
+        }
+    }
+}
+
 struct PackObjectBytesVisitor;
 
 impl<'de> de::Visitor<'de> for PackObjectBytesVisitor {
@@ -370,6 +382,97 @@ impl<'de> Deserialize<'de> for PackObject<xid::Id> {
         D: de::Deserializer<'de>,
     {
         deserializer.deserialize_any(PackObjectXidVisitor)
+    }
+}
+
+struct PackObjectUuidVisitor;
+
+impl<'de> de::Visitor<'de> for PackObjectUuidVisitor {
+    type Value = PackObject<uuid::Uuid>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a 16 bytes array or a uuid string")
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        if v.len() != 16 {
+            Err(de::Error::custom(format!(
+                "expected value length 16, got {:?}",
+                v.len()
+            )))
+        } else {
+            let mut bytes = [0u8; 16];
+            bytes.copy_from_slice(v);
+            Ok(PackObject::Cbor(uuid::Uuid::from_bytes(bytes)))
+        }
+    }
+
+    fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        if v.len() != 16 {
+            Err(de::Error::custom(format!(
+                "expected value length 16, got {:?}",
+                v.len()
+            )))
+        } else {
+            let mut bytes = [0u8; 16];
+            bytes.copy_from_slice(v);
+            Ok(PackObject::Cbor(uuid::Uuid::from_bytes(bytes)))
+        }
+    }
+
+    fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        if v.len() != 16 {
+            Err(de::Error::custom(format!(
+                "expected value length 16, got {:?}",
+                v.len()
+            )))
+        } else {
+            let mut bytes = [0u8; 16];
+            bytes.copy_from_slice(&v);
+            Ok(PackObject::Cbor(uuid::Uuid::from_bytes(bytes)))
+        }
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let id = uuid::Uuid::parse_str(v).map_err(de::Error::custom)?;
+        Ok(PackObject::Json(id))
+    }
+
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let id = uuid::Uuid::parse_str(v).map_err(de::Error::custom)?;
+        Ok(PackObject::Json(id))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let id = uuid::Uuid::parse_str(&v).map_err(de::Error::custom)?;
+        Ok(PackObject::Json(id))
+    }
+}
+
+impl<'de> Deserialize<'de> for PackObject<uuid::Uuid> {
+    fn deserialize<D>(deserializer: D) -> Result<PackObject<uuid::Uuid>, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(PackObjectUuidVisitor)
     }
 }
 

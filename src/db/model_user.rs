@@ -13,7 +13,7 @@ use crate::db::{
 
 #[derive(Debug, Default, Clone, CqlOrm)]
 pub struct UserIndex {
-    pub cn: String,
+    pub cn: String, // should be lowercase
     pub id: xid::Id,
     pub created_at: i64,
     pub expire_at: i64,
@@ -50,7 +50,7 @@ impl UserIndex {
         Ok(())
     }
 
-    pub async fn save(&mut self, db: &scylladb::ScyllaDB, expire_ms: i64) -> anyhow::Result<bool> {
+    async fn save(&mut self, db: &scylladb::ScyllaDB, expire_ms: i64) -> anyhow::Result<bool> {
         self._fields = Self::fields();
         let now = unix_ms() as i64;
         self.created_at = now;
@@ -66,7 +66,7 @@ impl UserIndex {
         Ok(true)
     }
 
-    pub async fn update_expire(
+    async fn update_expire(
         &mut self,
         db: &scylladb::ScyllaDB,
         expire_at: i64,
@@ -104,7 +104,7 @@ impl UserIndex {
         Ok(true)
     }
 
-    pub async fn reset_cn(&mut self, db: &scylladb::ScyllaDB, id: xid::Id) -> anyhow::Result<bool> {
+    async fn reset_cn(&mut self, db: &scylladb::ScyllaDB, id: xid::Id) -> anyhow::Result<bool> {
         self.get_one(db).await?;
         let now = unix_ms() as i64;
         if self.expire_at == 0 || self.expire_at + 1000 * 3600 * 24 * 365 > now {
@@ -145,7 +145,7 @@ impl UserIndex {
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct User {
     pub id: xid::Id,
-    pub cn: String,
+    pub cn: String, // should be lowercase
     pub gid: xid::Id,
     pub status: i8,
     pub rating: i8,
@@ -201,6 +201,17 @@ impl User {
         }
 
         Ok(select_fields)
+    }
+
+    pub fn status_name(&self) -> String {
+        match self.status {
+            -2 => "Disabled".to_string(),
+            -1 => "Suspended".to_string(),
+            0 => "Normal".to_string(),
+            1 => "Verified".to_string(),
+            2 => "Protected".to_string(),
+            _ => "Unknown".to_string(),
+        }
     }
 
     pub fn valid_status(&self, status: i8) -> anyhow::Result<()> {
@@ -276,7 +287,7 @@ impl User {
         let mut i: u8 = 0;
         let expire: i64 = 1000 * 3600 * 24 * 365 * 99; // default CN expire 99 years
         loop {
-            self.cn = xid_to_cn(self.id, i);
+            self.cn = xid_to_cn(&self.id, i);
 
             let mut index = UserIndex::with_pk(self.cn.clone());
             index.id = self.id;
@@ -336,6 +347,10 @@ impl User {
         updated_at: i64,
     ) -> anyhow::Result<bool> {
         // TODO: update with UserIndex
+        if cn != cn.to_lowercase().trim() {
+            return Err(HTTPError::new(400, format!("Invalid cn, {}", cn)).into());
+        }
+
         self.get_one(db, vec!["cn".to_string(), "updated_at".to_string()])
             .await?;
         if self.updated_at != updated_at {
