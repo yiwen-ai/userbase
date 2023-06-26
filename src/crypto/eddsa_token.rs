@@ -153,7 +153,7 @@ impl Token {
             issued_at: Some(Timestamp::WholeSeconds(self.iat)),
             cwt_id: Some(self.sid.as_bytes().to_vec()),
             rest: vec![(
-                ClaimName::Text(String::from("ctx")),
+                ClaimName::Assigned(iana::CwtClaimName::Ctx),
                 ciborium::value::Value::Bytes(rt),
             )],
         }

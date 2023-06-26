@@ -407,8 +407,7 @@ checksum = "e496a50fda8aacccc86d7529e2c1e0892dbd0f898a6b5645b5561b89c3210efa"
 [[package]]
 name = "coset"
 version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c765a4e852cef25c69a48e9fcd60995a7fecabf0134a0021e7181452c4a60f95"
+source = "git+https://github.com/yiwen-ai/coset.git?branch=yiwen#7c8aaa7bb218e052a2ae5c0b7ccce98aa76908dc"
 dependencies = [
  "ciborium",
  "ciborium-io",
