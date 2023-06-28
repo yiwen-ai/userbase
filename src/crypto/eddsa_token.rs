@@ -174,6 +174,18 @@ impl Token {
     }
 }
 
+// TODO https://openid.net/specs/openid-connect-core-1_0.html#IDToken
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct IDToken {
+    pub iss: String,
+    pub sub: uuid::Uuid, // sub (Subject) Claim, user
+    pub aud: xid::Id,    // aud (Audience) Claim, app
+    pub exp: i64,        // exp (Expiration Time) Claim
+    pub iat: i64,        // iat (Issued At) Claim
+    pub auth_time: i64,
+    pub nonce: String,
+}
+
 fn unwrap_timestamp(ts: Timestamp) -> i64 {
     match ts {
         Timestamp::WholeSeconds(ts) => ts,

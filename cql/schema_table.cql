@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS group_index (
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
+-- https://schema.org/Organization
 CREATE TABLE IF NOT EXISTS group (
     id          BLOB,       -- group id, 12 bytes XID, https://docs.rs/xid/latest/xid/
     cn          TEXT,       -- group common name, globally unique

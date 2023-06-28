@@ -181,10 +181,16 @@ pub struct UpdateGroupInput {
     pub updated_at: i64,
     #[validate(length(min = 3, max = 24))]
     pub name: Option<String>,
-    #[validate(url)]
-    pub logo: Option<String>,
     #[validate(length(min = 0, max = 6))]
     pub keywords: Option<Vec<String>>,
+    #[validate(url)]
+    pub logo: Option<String>,
+    #[validate(length(min = 10, max = 127))]
+    pub slogan: Option<String>,
+    #[validate(length(min = 3, max = 127))]
+    pub address: Option<String>,
+    #[validate(url)]
+    pub website: Option<String>,
     pub description: Option<PackObject<Vec<u8>>>,
 }
 
@@ -194,11 +200,20 @@ impl UpdateGroupInput {
         if let Some(name) = self.name {
             cols.set_as("name", &name);
         }
+        if let Some(keywords) = self.keywords {
+            cols.set_as("keywords", &keywords);
+        }
         if let Some(logo) = self.logo {
             cols.set_as("logo", &logo);
         }
-        if let Some(keywords) = self.keywords {
-            cols.set_as("keywords", &keywords);
+        if let Some(slogan) = self.slogan {
+            cols.set_as("slogan", &slogan);
+        }
+        if let Some(address) = self.address {
+            cols.set_as("address", &address);
+        }
+        if let Some(website) = self.website {
+            cols.set_as("website", &website);
         }
         if let Some(description) = self.description {
             let description = description.unwrap();

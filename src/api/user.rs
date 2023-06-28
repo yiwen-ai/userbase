@@ -205,11 +205,14 @@ pub struct UpdateUserInput {
     pub updated_at: i64,
     #[validate(length(min = 3, max = 24))]
     pub name: Option<String>,
-    pub language: Option<PackObject<Language>>,
+    pub birthdate: Option<String>,
+    pub locale: Option<PackObject<Language>>,
     #[validate(url)]
-    pub avatar: Option<String>,
+    pub picture: Option<String>,
     #[validate(length(min = 2, max = 128))]
-    pub location: Option<String>,
+    pub address: Option<String>,
+    #[validate(url)]
+    pub website: Option<String>,
     pub bio: Option<PackObject<Vec<u8>>>,
 }
 
@@ -219,14 +222,20 @@ impl UpdateUserInput {
         if let Some(name) = self.name {
             cols.set_as("name", &name);
         }
-        if let Some(language) = self.language {
-            cols.set_as("language", &language.unwrap());
+        if let Some(birthdate) = self.birthdate {
+            cols.set_as("birthdate", &birthdate);
         }
-        if let Some(avatar) = self.avatar {
-            cols.set_as("avatar", &avatar);
+        if let Some(locale) = self.locale {
+            cols.set_as("locale", &locale.unwrap());
         }
-        if let Some(location) = self.location {
-            cols.set_as("location", &location);
+        if let Some(picture) = self.picture {
+            cols.set_as("picture", &picture);
+        }
+        if let Some(address) = self.address {
+            cols.set_as("address", &address);
+        }
+        if let Some(website) = self.website {
+            cols.set_as("website", &website);
         }
         if let Some(bio) = self.bio {
             let bio = bio.unwrap();
