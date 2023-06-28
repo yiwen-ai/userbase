@@ -145,10 +145,14 @@ pub struct Group {
     pub uid: xid::Id,
     pub created_at: i64,
     pub updated_at: i64,
-    pub name: String,
-    pub logo: String,
-    pub keywords: Vec<String>,
     pub email: String,
+    pub legal_name: String,
+    pub name: String,
+    pub keywords: Vec<String>,
+    pub logo: String,
+    pub slogan: String,
+    pub address: String,
+    pub website: String,
     pub description: Vec<u8>,
 
     pub _role: i8,            // user' role in this group
@@ -465,7 +469,15 @@ impl Group {
         cols: ColumnsMap,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
-        let valid_fields = vec!["name", "logo", "keywords", "description"];
+        let valid_fields = vec![
+            "name",
+            "keywords",
+            "logo",
+            "slogan",
+            "address",
+            "website",
+            "description",
+        ];
         let update_fields = cols.keys();
         for field in &update_fields {
             if !valid_fields.contains(&field.as_str()) {

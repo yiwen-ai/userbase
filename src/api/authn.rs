@@ -20,9 +20,9 @@ pub struct AuthNInput {
     #[validate(length(min = 3, max = 10))]
     pub idp: String,
     #[validate(length(min = 3, max = 40))]
-    pub aid: String,
+    pub aud: String,
     #[validate(length(min = 3, max = 60))]
-    pub oid: String,
+    pub sub: String,
     pub uid: PackObject<xid::Id>,
     pub expires_in: i32,
     pub scope: HashSet<String>,
@@ -52,8 +52,8 @@ pub async fn login_or_new(
     ctx.set_kvs(vec![
         ("action", "login_or_new".into()),
         ("idp", input.idp.clone().into()),
-        ("aid", input.aid.clone().into()),
-        ("oid", input.oid.clone().into()),
+        ("aud", input.aud.clone().into()),
+        ("sub", input.sub.clone().into()),
         ("uid", uid.to_string().into()),
     ])
     .await;
@@ -76,7 +76,7 @@ pub async fn login_or_new(
         ));
     }
 
-    let mut doc = db::AuthN::with_pk(input.idp.clone(), input.aid.clone(), input.oid.clone());
+    let mut doc = db::AuthN::with_pk(input.idp.clone(), input.aud.clone(), input.sub.clone());
     match doc.get_one(&app.scylla, vec!["uid".to_string()]).await {
         Ok(_) => {
             // update
@@ -109,12 +109,11 @@ pub async fn login_or_new(
     let mut session = db::Session {
         id: xid::new(),
         uid,
-        ip: input.ip.clone(),
         device_id: input.device_id,
         device_desc: input.device_desc,
         idp: input.idp,
-        aid: input.aid,
-        oid: input.oid,
+        aud: input.aud,
+        sub: input.sub,
         ..Default::default()
     };
 
@@ -130,8 +129,8 @@ pub async fn login_or_new(
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct AuthNOutput {
     pub idp: String,
-    pub aid: String,
-    pub oid: String,
+    pub aud: String,
+    pub sub: String,
     pub uid: PackObject<xid::Id>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
@@ -151,8 +150,8 @@ impl AuthNOutput {
     pub fn from<T>(val: db::AuthN, to: &PackObject<T>) -> Self {
         let mut rt = Self {
             idp: val.idp,
-            aid: val.aid,
-            oid: val.oid,
+            aud: val.aud,
+            sub: val.sub,
             uid: to.with(val.uid),
             ..Default::default()
         };
@@ -199,9 +198,9 @@ pub struct AuthNPKInput {
     #[validate(length(min = 3, max = 10))]
     pub idp: String,
     #[validate(length(min = 3, max = 40))]
-    pub aid: String,
+    pub aud: String,
     #[validate(length(min = 3, max = 60))]
-    pub oid: String,
+    pub sub: String,
     pub fields: Option<String>,
 }
 
@@ -216,13 +215,13 @@ pub async fn delete(
     ctx.set_kvs(vec![
         ("action", "delete_authn".into()),
         ("idp", input.idp.clone().into()),
-        ("aid", input.aid.clone().into()),
-        ("oid", input.oid.clone().into()),
+        ("aud", input.aud.clone().into()),
+        ("sub", input.sub.clone().into()),
         ("uid", ctx.user.to_string().into()),
     ])
     .await;
 
-    let mut doc = db::AuthN::with_pk(input.idp.clone(), input.aid.clone(), input.oid.clone());
+    let mut doc = db::AuthN::with_pk(input.idp.clone(), input.aud.clone(), input.sub.clone());
     let res = doc.delete(&app.scylla, ctx.user).await?;
     Ok(to.with(SuccessResponse::new(res)))
 }
@@ -238,13 +237,13 @@ pub async fn get(
     ctx.set_kvs(vec![
         ("action", "get_authn".into()),
         ("idp", input.idp.clone().into()),
-        ("aid", input.aid.clone().into()),
-        ("oid", input.oid.clone().into()),
+        ("aud", input.aud.clone().into()),
+        ("sub", input.sub.clone().into()),
         ("uid", ctx.user.to_string().into()),
     ])
     .await;
 
-    let mut doc = db::AuthN::with_pk(input.idp.clone(), input.aid.clone(), input.oid.clone());
+    let mut doc = db::AuthN::with_pk(input.idp.clone(), input.aud.clone(), input.sub.clone());
     let fields = input
         .fields
         .clone()

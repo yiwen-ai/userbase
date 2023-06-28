@@ -150,14 +150,16 @@ pub struct User {
     pub status: i8,
     pub rating: i8,
     pub kind: i8,
-    pub name: String,
-    pub language: Language,
     pub created_at: i64,
     pub updated_at: i64,
-    pub avatar: String,
-    pub location: String,
     pub email: String,
     pub phone: String,
+    pub name: String,
+    pub birthdate: String, // yyyy-mm-dd
+    pub locale: Language,
+    pub picture: String,
+    pub address: String,
+    pub website: String,
     pub bio: Vec<u8>,
 
     pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
@@ -607,7 +609,15 @@ impl User {
         cols: ColumnsMap,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
-        let valid_fields = vec!["name", "language", "avatar", "location", "bio"];
+        let valid_fields = vec![
+            "name",
+            "birthdate",
+            "locale",
+            "picture",
+            "address",
+            "website",
+            "bio",
+        ];
         let update_fields = cols.keys();
         for field in &update_fields {
             if !valid_fields.contains(&field.as_str()) {

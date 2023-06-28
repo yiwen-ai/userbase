@@ -23,6 +23,7 @@ pub struct ScyllaDB {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Keys {
+    pub issuer: String,
     pub aad: String,
     pub kek: String,
     pub id_key_file: String,

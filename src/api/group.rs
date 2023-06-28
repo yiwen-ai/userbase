@@ -32,23 +32,31 @@ pub struct GroupOutput {
     pub id: PackObject<xid::Id>,
     pub cn: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub uid: Option<PackObject<xid::Id>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<i8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<i8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub uid: Option<PackObject<xid::Id>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    pub email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub logo: Option<String>,
+    pub legal_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keywords: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub email: Option<String>,
+    pub logo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slogan: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub website: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<PackObject<Vec<u8>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,15 +75,19 @@ impl GroupOutput {
 
         for v in val._fields {
             match v.as_str() {
+                "uid" => rt.uid = Some(to.with(val.uid)),
                 "status" => rt.status = Some(val.status),
                 "kind" => rt.kind = Some(val.kind),
-                "uid" => rt.uid = Some(to.with(val.uid)),
                 "created_at" => rt.created_at = Some(val.created_at),
                 "updated_at" => rt.updated_at = Some(val.updated_at),
-                "name" => rt.name = Some(val.name.to_owned()),
-                "logo" => rt.logo = Some(val.logo.to_owned()),
-                "keywords" => rt.keywords = Some(val.keywords.to_owned()),
                 "email" => rt.email = Some(val.email.to_owned()),
+                "legal_name" => rt.legal_name = Some(val.legal_name.to_owned()),
+                "name" => rt.name = Some(val.name.to_owned()),
+                "keywords" => rt.keywords = Some(val.keywords.to_owned()),
+                "logo" => rt.logo = Some(val.logo.to_owned()),
+                "slogan" => rt.slogan = Some(val.slogan.to_owned()),
+                "address" => rt.address = Some(val.address.to_owned()),
+                "website" => rt.website = Some(val.website.to_owned()),
                 "description" => rt.description = Some(to.with(val.description.to_owned())),
                 "_role" => rt._role = Some(val._role),
                 "_priority" => rt._priority = Some(val._priority),

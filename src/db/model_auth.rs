@@ -17,8 +17,8 @@ const SESSION_TTL_MAX: i32 = 3600 * 24 * 400; // 400 days
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct AuthN {
     pub idp: String,
-    pub aid: String,
-    pub oid: String,
+    pub aud: String,
+    pub sub: String,
     pub uid: xid::Id,
     pub created_at: i64,
     pub updated_at: i64,
@@ -31,11 +31,11 @@ pub struct AuthN {
 }
 
 impl AuthN {
-    pub fn with_pk(idp: String, aid: String, oid: String) -> Self {
+    pub fn with_pk(idp: String, aud: String, sub: String) -> Self {
         Self {
             idp,
-            aid,
-            oid,
+            aud,
+            sub,
             ..Default::default()
         }
     }
@@ -63,11 +63,11 @@ impl AuthN {
             if !select_fields.contains(&field) {
                 select_fields.push(field);
             }
-            let field = "aid".to_string();
+            let field = "aud".to_string();
             if !select_fields.contains(&field) {
                 select_fields.push(field);
             }
-            let field = "oid".to_string();
+            let field = "sub".to_string();
             if !select_fields.contains(&field) {
                 select_fields.push(field);
             }
@@ -86,10 +86,10 @@ impl AuthN {
         self._fields = fields.clone();
 
         let query = format!(
-            "SELECT {} FROM authn WHERE idp=? AND aid=? AND oid=? LIMIT 1",
+            "SELECT {} FROM authn WHERE idp=? AND aud=? AND sub=? LIMIT 1",
             fields.join(",")
         );
-        let params = (&self.idp, &self.aid, &self.oid);
+        let params = (&self.idp, &self.aud, &self.sub);
         let res = db.execute(query, params).await?.single_row()?;
 
         let mut cols = ColumnsMap::with_capacity(fields.len());
@@ -130,7 +130,7 @@ impl AuthN {
                 409,
                 format!(
                     "AuthN {}, {}, {}, {} save failed, please try again",
-                    self.idp, self.aid, self.oid, self.uid
+                    self.idp, self.aud, self.sub, self.uid
                 ),
             )
             .into());
@@ -166,12 +166,12 @@ impl AuthN {
         }
 
         let query = format!(
-            "UPDATE authn SET {} WHERE idp=? AND aid=? AND oid=? IF uid=?",
+            "UPDATE authn SET {} WHERE idp=? AND aud=? AND sub=? IF uid=?",
             set_fields.join(",")
         );
         params.push(self.idp.to_cql());
-        params.push(self.aid.to_cql());
-        params.push(self.oid.to_cql());
+        params.push(self.aud.to_cql());
+        params.push(self.sub.to_cql());
         params.push(uid.to_cql());
 
         let res = db.execute(query, params).await?;
@@ -180,7 +180,7 @@ impl AuthN {
                 409,
                 format!(
                     "AuthN {}, {}, {} update failed, please try again",
-                    self.idp, self.aid, self.oid
+                    self.idp, self.aud, self.sub
                 ),
             )
             .into());
@@ -201,17 +201,17 @@ impl AuthN {
                 409,
                 format!(
                     "AuthN {}, {}, {} delete conflict, expected uid {}, got {}",
-                    self.idp, self.aid, self.oid, self.uid, uid
+                    self.idp, self.aud, self.sub, self.uid, uid
                 ),
             )
             .into());
         }
 
-        let query = "DELETE FROM authn WHERE idp=? AND aid=? AND oid=? IF uid=?";
+        let query = "DELETE FROM authn WHERE idp=? AND aud=? AND sub=? IF uid=?";
         let params = (
             self.idp.to_cql(),
-            self.aid.to_cql(),
-            self.oid.to_cql(),
+            self.aud.to_cql(),
+            self.sub.to_cql(),
             uid.to_cql(),
         );
         let res = db.execute(query, params).await?;
@@ -220,7 +220,7 @@ impl AuthN {
                 409,
                 format!(
                     "AuthN {}, {}, {} delete failed, please try again",
-                    self.idp, self.aid, self.oid
+                    self.idp, self.aud, self.sub
                 ),
             )
             .into());
@@ -260,8 +260,8 @@ impl AuthN {
 
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct AuthZ {
-    pub oid: uuid::Uuid,
-    pub aid: xid::Id,
+    pub sub: uuid::Uuid,
+    pub aud: xid::Id,
     pub uid: xid::Id,
     pub created_at: i64,
     pub updated_at: i64,
@@ -273,10 +273,10 @@ pub struct AuthZ {
 }
 
 impl AuthZ {
-    pub fn with_pk(oid: uuid::Uuid, aid: xid::Id) -> Self {
+    pub fn with_pk(sub: uuid::Uuid, aud: xid::Id) -> Self {
         Self {
-            oid,
-            aid,
+            sub,
+            aud,
             ..Default::default()
         }
     }
@@ -295,11 +295,11 @@ impl AuthZ {
 
         if with_pk {
             let mut select_fields = select_fields;
-            let field = "oid".to_string();
+            let field = "sub".to_string();
             if !select_fields.contains(&field) {
                 select_fields.push(field);
             }
-            let field = "aid".to_string();
+            let field = "aud".to_string();
             if !select_fields.contains(&field) {
                 select_fields.push(field);
             }
@@ -318,10 +318,10 @@ impl AuthZ {
         self._fields = fields.clone();
 
         let query = format!(
-            "SELECT {} FROM authz WHERE oid=? AND aid=? LIMIT 1",
+            "SELECT {} FROM authz WHERE sub=? AND aud=? LIMIT 1",
             fields.join(",")
         );
-        let params = (self.oid.to_cql(), self.aid.to_cql());
+        let params = (self.sub.to_cql(), self.aud.to_cql());
         let res = db.execute(query, params).await?.single_row()?;
 
         let mut cols = ColumnsMap::with_capacity(fields.len());
@@ -362,7 +362,7 @@ impl AuthZ {
                 409,
                 format!(
                     "AuthZ {}, {}, {} save failed, please try again",
-                    self.oid, self.aid, self.uid
+                    self.sub, self.aud, self.uid
                 ),
             )
             .into());
@@ -391,7 +391,7 @@ impl AuthZ {
                 409,
                 format!(
                     "AuthZ {}, {} updated conflict, expected {}, got {}",
-                    self.oid, self.aid, self.uid, uid
+                    self.sub, self.aud, self.uid, uid
                 ),
             )
             .into());
@@ -410,11 +410,11 @@ impl AuthZ {
         }
 
         let query = format!(
-            "UPDATE authz SET {} WHERE oid=? AND aid=? IF EXISTS",
+            "UPDATE authz SET {} WHERE sub=? AND aud=? IF EXISTS",
             set_fields.join(",")
         );
-        params.push(self.oid.to_cql());
-        params.push(self.aid.to_cql());
+        params.push(self.sub.to_cql());
+        params.push(self.aud.to_cql());
 
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
@@ -422,7 +422,7 @@ impl AuthZ {
                 409,
                 format!(
                     "AuthZ {}, {} update failed, please try again",
-                    self.oid, self.aid
+                    self.sub, self.aud
                 ),
             )
             .into());
@@ -465,15 +465,14 @@ impl AuthZ {
 pub struct Session {
     pub id: xid::Id,
     pub uid: xid::Id,
-    pub ip: String,
     pub created_at: i64,
     pub updated_at: i64,
     pub ttl: i32,
     pub device_id: String,
     pub device_desc: String,
     pub idp: String,
-    pub aid: String,
-    pub oid: String,
+    pub aud: String,
+    pub sub: String,
 
     pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
 }
@@ -620,24 +619,6 @@ impl Session {
             .into());
         }
 
-        Ok(true)
-    }
-
-    pub async fn update_ip(&mut self, db: &scylladb::ScyllaDB, ip: String) -> anyhow::Result<bool> {
-        let new_updated_at = unix_ms() as i64;
-        let query = "UPDATE session SET ip=?,updated_at=? WHERE id=? IF EXISTS".to_string();
-        let params = (ip, new_updated_at, self.id.to_cql());
-
-        let res = db.execute(query, params).await?;
-        if !extract_applied(res) {
-            return Err(HTTPError::new(
-                409,
-                format!("Session {} update ip failed, please try again", self.id),
-            )
-            .into());
-        }
-
-        self.updated_at = new_updated_at;
         Ok(true)
     }
 

@@ -13,12 +13,12 @@ impl Session {
         }
     }
 
-    pub fn session(&self, sid: &xid::Id, uid: &xid::Id, oid: Option<&uuid::Uuid>) -> String {
-        let data = if let Some(oid) = oid {
+    pub fn session(&self, sid: &xid::Id, uid: &xid::Id, sub: Option<&uuid::Uuid>) -> String {
+        let data = if let Some(sub) = sub {
             let mut buf: Vec<u8> = Vec::with_capacity(40);
             buf.extend_from_slice(sid.as_bytes());
             buf.extend_from_slice(uid.as_bytes());
-            buf.extend_from_slice(oid.as_bytes());
+            buf.extend_from_slice(sub.as_bytes());
             buf
         } else {
             let mut buf: Vec<u8> = Vec::with_capacity(24);
@@ -50,12 +50,12 @@ impl Session {
                 sid.copy_from_slice(&data[..12]);
                 let mut uid = [0u8; 12];
                 uid.copy_from_slice(&data[12..24]);
-                let mut oid = [0u8; 16];
-                oid.copy_from_slice(&data[24..]);
+                let mut sub = [0u8; 16];
+                sub.copy_from_slice(&data[24..]);
                 Ok((
                     xid::Id(sid),
                     xid::Id(uid),
-                    Some(uuid::Uuid::from_bytes(oid)),
+                    Some(uuid::Uuid::from_bytes(sub)),
                 ))
             }
             _ => Err(anyhow::Error::msg("invalid session")),
@@ -77,15 +77,15 @@ mod tests {
 
         let sid = xid::new();
         let uid = xid::new();
-        let oid = uuid::Uuid::new_v4();
+        let sub = uuid::Uuid::new_v4();
 
-        let s1 = aes_session.session(&sid, &uid, Some(&oid));
+        let s1 = aes_session.session(&sid, &uid, Some(&sub));
 
         assert!(aes_session.from(&s1[1..]).is_err());
         let (a, b, c) = aes_session.from(&s1).unwrap();
         assert_eq!(a, sid);
         assert_eq!(b, uid);
-        assert_eq!(c, Some(oid));
+        assert_eq!(c, Some(sub));
 
         let s2 = aes_session.session(&sid, &uid, None);
         assert_ne!(s1, s2);
@@ -102,13 +102,13 @@ mod tests {
         assert!(aes_session.from(&s1).is_err());
         assert!(aes_session.from(&s2).is_err());
 
-        let s3 = aes_session.session(&sid, &uid, Some(&oid));
+        let s3 = aes_session.session(&sid, &uid, Some(&sub));
 
         assert!(aes_session.from(&s3[3..]).is_err());
         let (a, b, c) = aes_session.from(&s3).unwrap();
         assert_eq!(a, sid);
         assert_eq!(b, uid);
-        assert_eq!(c, Some(oid));
+        assert_eq!(c, Some(sub));
 
         let s4 = aes_session.session(&sid, &uid, None);
         assert_ne!(s4, s3);

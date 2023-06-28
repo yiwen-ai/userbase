@@ -11,6 +11,7 @@ use axum_web::context::unix_ms;
 const CLOCK_SKEW: i64 = 5 * 60; // 5 minutes
 
 pub struct Cwt {
+    iss: String,
     kid: Vec<u8>,
     aad: Vec<u8>,
     kek: KekAes256,
@@ -18,8 +19,9 @@ pub struct Cwt {
 }
 
 impl Cwt {
-    pub fn new(secret_key: [u8; 32], kid: &[u8], aad: &[u8]) -> Self {
+    pub fn new(secret_key: [u8; 32], iss: &str, kid: &[u8], aad: &[u8]) -> Self {
         Self {
+            iss: iss.to_string(),
             kid: kid.to_vec(),
             aad: aad.to_vec(),
             kek: KekAes256::from(secret_key),
@@ -92,14 +94,14 @@ impl Cwt {
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub iss: String,
-    pub user: uuid::Uuid, // sub (Subject) Claim
-    pub app: xid::Id,     // aud (Audience) Claim
-    pub exp: i64,         // exp (Expiration Time) Claim
-    pub nbf: i64,         // nbf (Not Before) Claim
-    pub iat: i64,         // iat (Issued At) Claim
-    pub sid: xid::Id,     // cti (CWT ID) Claim
-    pub scope: String,    // scope Claim, ignored for now
-    pub uid: xid::Id,     // key: "ctx", 24 bytes, Encrypted(uid, status, rating, kind)
+    pub sub: uuid::Uuid, // sub (Subject) Claim, user
+    pub aud: xid::Id,    // aud (Audience) Claim, app
+    pub exp: i64,        // exp (Expiration Time) Claim
+    pub nbf: i64,        // nbf (Not Before) Claim
+    pub iat: i64,        // iat (Issued At) Claim
+    pub sid: xid::Id,    // cti (CWT ID) Claim
+    pub scope: String,   // scope Claim, ignored for now
+    pub uid: xid::Id,    // key: "ctx", 24 bytes, Encrypted(uid, status, rating, kind)
     pub status: i8,
     pub rating: i8,
     pub kind: i8,
@@ -120,8 +122,8 @@ impl Token {
         )?;
         Ok(Self {
             iss: cwt.issuer.unwrap_or_default(),
-            user: uuid::Uuid::parse_str(cwt.subject.unwrap_or_default().as_str())?,
-            app: xid::Id::from_str(cwt.audience.unwrap_or_default().as_str())?,
+            sub: uuid::Uuid::parse_str(cwt.subject.unwrap_or_default().as_str())?,
+            aud: xid::Id::from_str(cwt.audience.unwrap_or_default().as_str())?,
             exp: cwt.expiration_time.map_or(0, unwrap_timestamp),
             nbf: cwt.not_before.map_or(0, unwrap_timestamp),
             iat: cwt.issued_at.map_or(0, unwrap_timestamp),
@@ -142,8 +144,8 @@ impl Token {
 
         ClaimsSet {
             issuer: Some(self.iss.clone()),
-            subject: Some(self.user.to_string()),
-            audience: Some(self.app.to_string()),
+            subject: Some(self.sub.to_string()),
+            audience: Some(self.aud.to_string()),
             expiration_time: Some(Timestamp::WholeSeconds(self.exp)),
             not_before: if self.nbf > 0 {
                 Some(Timestamp::WholeSeconds(self.nbf))
@@ -198,11 +200,11 @@ mod tests {
         let mut key = [0u8; 32];
         OsRng.fill_bytes(&mut key);
 
-        let cwt = Cwt::new(key, b"yw01", b"yiwen.ai");
+        let cwt = Cwt::new(key, "https://auth.yiwen.ai", b"yw01", b"yiwen.ai");
         let now = unix_ms() as i64;
         let token = Token {
-            user: uuid::Uuid::new_v4(),
-            app: xid::new(),
+            sub: uuid::Uuid::new_v4(),
+            aud: xid::new(),
             exp: now + 3600 * 2,
             iat: now,
             sid: xid::new(),

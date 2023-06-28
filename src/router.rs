@@ -165,7 +165,12 @@ async fn new_app_state(cfg: conf::Conf) -> anyhow::Result<api::AppState> {
             aad,
             &fs::read_to_string(cfg.keys.token_key_file)?,
         )?;
-        crypto::Cwt::new(token_key.get_private()?, &token_key.key_id(), aad)
+        crypto::Cwt::new(
+            token_key.get_private()?,
+            cfg.keys.issuer.as_str(),
+            &token_key.key_id(),
+            aad,
+        )
     };
 
     let scylla = {

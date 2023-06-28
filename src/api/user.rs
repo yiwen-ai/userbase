@@ -20,9 +20,9 @@ use crate::api::{group::GroupOutput, AppState, Pagination, QueryIdCn, UpdateSpec
 pub struct CreateUserInput {
     #[validate(length(min = 3, max = 24))]
     pub name: String,
-    pub language: PackObject<Language>,
+    pub locale: PackObject<Language>,
     #[validate(url)]
-    pub avatar: Option<String>,
+    pub picture: Option<String>,
     pub gid: Option<PackObject<xid::Id>>,
 }
 
@@ -38,21 +38,25 @@ pub struct UserOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<i8>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub language: Option<PackObject<Language>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub avatar: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub location: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub phone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birthdate: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<PackObject<Language>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picture: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub website: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bio: Option<PackObject<Vec<u8>>>,
 }
@@ -71,14 +75,16 @@ impl UserOutput {
                 "status" => rt.status = Some(val.status),
                 "rating" => rt.rating = Some(val.rating),
                 "kind" => rt.kind = Some(val.kind),
-                "name" => rt.name = Some(val.name.to_owned()),
-                "language" => rt.language = Some(to.with(val.language)),
                 "created_at" => rt.created_at = Some(val.created_at),
                 "updated_at" => rt.updated_at = Some(val.updated_at),
-                "avatar" => rt.avatar = Some(val.avatar.to_owned()),
-                "location" => rt.location = Some(val.location.to_owned()),
                 "email" => rt.email = Some(val.email.to_owned()),
                 "phone" => rt.phone = Some(val.phone.to_owned()),
+                "name" => rt.name = Some(val.name.to_owned()),
+                "birthdate" => rt.birthdate = Some(val.birthdate.to_owned()),
+                "locale" => rt.locale = Some(to.with(val.locale)),
+                "picture" => rt.picture = Some(val.picture.to_owned()),
+                "address" => rt.address = Some(val.address.to_owned()),
+                "website" => rt.website = Some(val.website.to_owned()),
                 "bio" => rt.bio = Some(to.with(val.bio.to_owned())),
                 _ => {}
             }
@@ -101,8 +107,8 @@ pub async fn create(
         id,
         gid: input.gid.map_or(id, |id| id.unwrap()),
         name: input.name,
-        language: input.language.unwrap(),
-        avatar: input.avatar.unwrap_or_default(),
+        locale: input.locale.unwrap(),
+        picture: input.picture.unwrap_or_default(),
         ..Default::default()
     };
 
@@ -127,7 +133,7 @@ pub async fn create(
             cn: doc.cn.clone(),
             uid: doc.id,
             name: doc.name.clone(),
-            logo: doc.avatar.clone(),
+            logo: doc.picture.clone(),
             ..Default::default()
         };
         let res = group.save(&app.scylla).await;

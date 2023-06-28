@@ -1,8 +1,6 @@
 use axum::{
     extract::{Query, State},
-    headers::{
-        authorization::{Bearer, Credentials},
-    },
+    headers::authorization::{Bearer, Credentials},
     http::HeaderMap,
     Extension,
 };
@@ -21,8 +19,7 @@ use crate::db;
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct SessionInput {
     pub session: String,
-    pub ip: Option<String>,
-    pub aid: Option<PackObject<xid::Id>>,
+    pub aud: Option<PackObject<xid::Id>>,
     #[validate(range(min = 1, max = 31536000))]
     pub expires_in: Option<i32>, // seconds, default to 3600, max to 365 days
 }
@@ -32,9 +29,11 @@ pub struct SessionVerifyOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uid: Option<PackObject<xid::Id>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub oid: Option<PackObject<uuid::Uuid>>,
+    pub sub: Option<PackObject<uuid::Uuid>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub access_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id_token: Option<String>, // TODO https://openid.net/specs/openid-connect-core-1_0.html
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<i32>,
 }
@@ -47,17 +46,17 @@ pub async fn min_verify(
     let (to, input) = to.unpack();
     input.validate()?;
 
-    let (sid, uid, oid) = app
+    let (sid, uid, sub) = app
         .session
         .from(&input.session)
         .map_err(|e| HTTPError::new(401, format!("Invalid session, {}", e)))?;
 
-    let oid_str = oid.map_or_else(|| "".to_string(), |v| v.to_string());
+    let sub_str = sub.map_or_else(|| "".to_string(), |v| v.to_string());
     ctx.set_kvs(vec![
         ("action", "verify".into()),
         ("sid", sid.to_string().into()),
         ("uid", uid.to_string().into()),
-        ("oid", oid_str.into()),
+        ("sub", sub_str.into()),
     ])
     .await;
     let mut doc = db::Session::with_pk(sid);
@@ -77,14 +76,15 @@ pub async fn min_verify(
 
     let mut output = SessionVerifyOutput {
         uid: None,
-        oid: None,
+        sub: None,
         access_token: None,
+        id_token: None,
         expires_in: None,
     };
 
-    if oid.is_some() {
-        // oid is not None, means it's a session from app
-        output.oid = Some(to.with(oid.unwrap()));
+    if sub.is_some() {
+        // sub is not None, means it's a session from app
+        output.sub = Some(to.with(sub.unwrap()));
     } else {
         output.uid = Some(to.with(uid));
     }
@@ -99,22 +99,22 @@ pub async fn verify(
     let (to, input) = to.unpack();
     input.validate()?;
 
-    let (sid, uid, oid) = app
+    let (sid, uid, sub) = app
         .session
         .from(&input.session)
         .map_err(|e| HTTPError::new(401, format!("Invalid session, {}", e)))?;
 
-    let oid_str = oid.map_or_else(|| "".to_string(), |v| v.to_string());
+    let sub_str = sub.map_or_else(|| "".to_string(), |v| v.to_string());
     ctx.set_kvs(vec![
         ("action", "verify".into()),
         ("sid", sid.to_string().into()),
         ("uid", uid.to_string().into()),
-        ("oid", oid_str.into()),
+        ("sub", sub_str.into()),
     ])
     .await;
 
     let mut doc = db::Session::with_pk(sid);
-    doc.get_one(&app.scylla, vec!["uid".to_string(), "ip".to_string()])
+    doc.get_one(&app.scylla, vec!["uid".to_string()])
         .await
         .map_err(|e| HTTPError::new(401, format!("Invalid session, {}", e)))?;
 
@@ -126,13 +126,6 @@ pub async fn verify(
                 doc.uid, uid
             ),
         ));
-    }
-
-    if let Some(ip) = input.ip {
-        if ip != doc.ip {
-            ctx.set("ip", ip.clone().into()).await;
-            let _ = doc.update_ip(&app.scylla, ip).await;
-        }
     }
 
     let mut user = db::User::with_pk(uid);
@@ -147,14 +140,15 @@ pub async fn verify(
     }
     let mut output = SessionVerifyOutput {
         uid: None,
-        oid: None,
+        sub: None,
         access_token: None,
+        id_token: None,
         expires_in: None,
     };
 
-    if oid.is_some() {
-        // oid is not None, means it's a session from app
-        output.oid = Some(to.with(oid.unwrap()));
+    if sub.is_some() {
+        // sub is not None, means it's a session from app
+        output.sub = Some(to.with(sub.unwrap()));
     } else {
         output.uid = Some(to.with(uid));
     }
@@ -169,30 +163,30 @@ pub async fn renew_token(
     let (to, input) = to.unpack();
     input.validate()?;
 
-    if input.aid.is_none() {
+    if input.aud.is_none() {
         return Err(HTTPError::new(
             400,
-            "Invalid input, aid is none".to_string(),
+            "Invalid input, aud is none".to_string(),
         ));
     }
 
-    let (sid, uid, oid) = app
+    let (sid, uid, sub) = app
         .session
         .from(&input.session)
         .map_err(|e| HTTPError::new(401, format!("Invalid session, {}", e)))?;
 
-    let aid = input.aid.unwrap().unwrap();
+    let aud = input.aud.unwrap().unwrap();
     let jarvis = xid::Id::from_str(db::USER_JARVIS).unwrap();
     let mut gid = jarvis;
-    if aid != jarvis {
-        let mut app_user = db::User::with_pk(aid);
+    if aud != jarvis {
+        let mut app_user = db::User::with_pk(aud);
         app_user
             .get_one(
                 &app.scylla,
                 vec!["gid".to_string(), "status".to_string(), "kind".to_string()],
             )
             .await
-            .map_err(|_| HTTPError::new(403, format!("Invalid app {}", aid)))?;
+            .map_err(|_| HTTPError::new(403, format!("Invalid app {}", aud)))?;
         if app_user.status < 0 {
             return Err(HTTPError::new(
                 403,
@@ -206,23 +200,23 @@ pub async fn renew_token(
             ));
         }
         if app_user.gid != jarvis {
-            if oid.is_none() {
+            if sub.is_none() {
                 return Err(HTTPError::new(
                     403,
-                    "Invalid session, oid is none".to_string(),
+                    "Invalid session, sub is none".to_string(),
                 ));
             }
             gid = app_user.gid; // third party app
         }
     }
 
-    let oid = oid.unwrap_or_else(|| app.mac_id.uuid(&gid, &uid));
+    let sub = sub.unwrap_or_else(|| app.mac_id.uuid(&gid, &uid));
     ctx.set_kvs(vec![
         ("action", "renew_token".into()),
         ("sid", sid.to_string().into()),
         ("uid", uid.to_string().into()),
-        ("oid", oid.to_string().into()),
-        ("aid", aid.to_string().into()),
+        ("sub", sub.to_string().into()),
+        ("aud", aud.to_string().into()),
     ])
     .await;
 
@@ -231,9 +225,8 @@ pub async fn renew_token(
         &app.scylla,
         vec![
             "uid".to_string(),
-            "ip".to_string(),
-            "aid".to_string(),
-            "oid".to_string(),
+            "aud".to_string(),
+            "sub".to_string(),
             "created_at".to_string(),
             "ttl".to_string(),
         ],
@@ -250,34 +243,27 @@ pub async fn renew_token(
             ),
         ));
     }
-    if sess.oid != oid.to_string() {
+    if sess.sub != sub.to_string() {
         return Err(HTTPError::new(
             500,
             format!(
-                "Invalid session, oid not match, expected {}, got {}",
-                sess.oid, oid
+                "Invalid session, sub not match, expected {}, got {}",
+                sess.sub, sub
             ),
         ));
     }
-    if sess.aid != aid.to_string() {
+    if sess.aud != aud.to_string() {
         return Err(HTTPError::new(
             500,
             format!(
-                "Invalid session, aid not match, expected {}, got {}",
-                sess.aid, aid
+                "Invalid session, aud not match, expected {}, got {}",
+                sess.aud, aud
             ),
         ));
-    }
-
-    if let Some(ip) = input.ip {
-        if ip != sess.ip {
-            ctx.set("ip", ip.clone().into()).await;
-            let _ = sess.update_ip(&app.scylla, ip).await;
-        }
     }
 
     if gid != jarvis {
-        let mut authz = db::AuthZ::with_pk(oid, aid);
+        let mut authz = db::AuthZ::with_pk(sub, aud);
         authz
             .get_one(
                 &app.scylla,
@@ -319,8 +305,8 @@ pub async fn renew_token(
     let exp = now + expires_in as i64;
 
     let token = crypto::Token {
-        user: oid,
-        app: aid,
+        sub,
+        aud,
         exp,
         iat: now,
         sid,
@@ -354,8 +340,9 @@ pub async fn renew_token(
 
     Ok(to.with(SuccessResponse::new(SessionVerifyOutput {
         uid: None,
-        oid: Some(to.with(oid)),
+        sub: Some(to.with(sub)),
         access_token: Some(crypto::base64url_encode(&token)),
+        id_token: None,
         expires_in: Some(expires_in),
     })))
 }
@@ -365,11 +352,11 @@ pub struct SessionOutput {
     pub id: PackObject<xid::Id>,
     pub uid: PackObject<xid::Id>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ip: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -377,9 +364,9 @@ pub struct SessionOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idp: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub aid: Option<String>,
+    pub aud: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub oid: Option<String>,
+    pub sub: Option<String>,
 }
 
 impl SessionOutput {
@@ -392,18 +379,17 @@ impl SessionOutput {
 
         for v in val._fields {
             match v.as_str() {
-                "ip" => rt.ip = Some(val.ip.to_owned()),
                 "created_at" => rt.created_at = Some(val.created_at),
                 "updated_at" => rt.updated_at = Some(val.updated_at),
+                "ttl" => rt.ttl = Some(val.ttl),
                 "device_id" => rt.device_id = Some(val.device_id.to_owned()),
                 "device_desc" => rt.device_desc = Some(val.device_desc.to_owned()),
                 "idp" => rt.idp = Some(val.idp.to_owned()),
-                "aid" => rt.aid = Some(val.aid.to_owned()),
-                "oid" => rt.oid = Some(val.oid.to_owned()),
+                "aud" => rt.aud = Some(val.aud.to_owned()),
+                "sub" => rt.sub = Some(val.sub.to_owned()),
                 _ => {}
             }
         }
-
         rt
     }
 }
@@ -481,8 +467,8 @@ pub async fn get(
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct TokenVerifyOutput {
     pub uid: PackObject<xid::Id>,
-    pub aid: PackObject<xid::Id>,
-    pub oid: PackObject<uuid::Uuid>,
+    pub aud: PackObject<xid::Id>,
+    pub sub: PackObject<uuid::Uuid>,
     pub scope: String,
     pub status: i8,
     pub rating: i8,
@@ -517,7 +503,7 @@ pub async fn min_verify_token(
     ctx.set_kvs(vec![
         ("action", "min_verify_token".into()),
         ("uid", token.uid.to_string().into()),
-        ("oid", token.user.to_string().into()),
+        ("sub", token.sub.to_string().into()),
     ])
     .await;
 
@@ -532,8 +518,8 @@ pub async fn min_verify_token(
 
     Ok(to.with(SuccessResponse::new(TokenVerifyOutput {
         uid: to.with(token.uid),
-        aid: to.with(token.app),
-        oid: to.with(token.user),
+        aud: to.with(token.aud),
+        sub: to.with(token.sub),
         scope: token.scope,
         status: token.status,
         rating: token.rating,
@@ -569,7 +555,7 @@ pub async fn verify_token(
     ctx.set_kvs(vec![
         ("action", "min_verify_token".into()),
         ("uid", token.uid.to_string().into()),
-        ("oid", token.user.to_string().into()),
+        ("sub", token.sub.to_string().into()),
     ])
     .await;
 
@@ -583,12 +569,12 @@ pub async fn verify_token(
         .map_err(|_| HTTPError::new(401, format!("Invalid session, {}", token.sid)))?;
 
     let jarvis = xid::Id::from_str(db::USER_JARVIS).unwrap();
-    if token.app != jarvis {
-        let mut app_user = db::User::with_pk(token.app);
+    if token.aud != jarvis {
+        let mut app_user = db::User::with_pk(token.aud);
         app_user
             .get_one(&app.scylla, vec!["status".to_string()])
             .await
-            .map_err(|_| HTTPError::new(403, format!("Invalid app {}", token.app)))?;
+            .map_err(|_| HTTPError::new(403, format!("Invalid app {}", token.aud)))?;
         if app_user.status < 0 {
             return Err(HTTPError::new(
                 403,
@@ -617,8 +603,8 @@ pub async fn verify_token(
 
     Ok(to.with(SuccessResponse::new(TokenVerifyOutput {
         uid: to.with(token.uid),
-        aid: to.with(token.app),
-        oid: to.with(token.user),
+        aud: to.with(token.aud),
+        sub: to.with(token.sub),
         scope: token.scope,
         status: user.status,
         rating: user.rating,
