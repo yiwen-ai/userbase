@@ -400,6 +400,10 @@ impl Group {
         kind: i8,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
+        if !(-1..=4).contains(&kind) {
+            return Err(HTTPError::new(400, format!("Invalid kind, {}", kind)).into());
+        }
+
         self.get_one(db, vec!["kind".to_string(), "updated_at".to_string()])
             .await?;
         if self.updated_at != updated_at {
@@ -443,6 +447,10 @@ impl Group {
         email: String,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
+        if email != email.to_lowercase().trim() {
+            return Err(HTTPError::new(400, format!("Invalid email, {}", email)).into());
+        }
+
         self.get_one(db, vec!["email".to_string(), "updated_at".to_string()])
             .await?;
         if self.updated_at != updated_at {
@@ -552,5 +560,332 @@ impl Group {
 
         self.updated_at = new_updated_at;
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum_web::erring;
+    
+    use ciborium::cbor;
+
+    use tokio::sync::OnceCell;
+
+    use super::*;
+    use crate::conf;
+    use crate::db;
+
+    static DB: OnceCell<db::scylladb::ScyllaDB> = OnceCell::const_new();
+
+    async fn get_db() -> &'static db::scylladb::ScyllaDB {
+        DB.get_or_init(|| async {
+            let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
+            let res = db::scylladb::ScyllaDB::new(cfg.scylla, "userbase_test").await;
+            res.unwrap()
+        })
+        .await
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    // #[ignore]
+    async fn test_all() -> anyhow::Result<()> {
+        // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
+        group_index_model_works().await?;
+        group_model_works().await?;
+
+        Ok(())
+    }
+
+    // #[tokio::test(flavor = "current_thread")]
+    async fn group_index_model_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+
+        let id = xid::new();
+        let mut c1 = GroupIndex {
+            cn: xid_to_cn(&id, 0),
+            id,
+            ..Default::default()
+        };
+        c1.save(db, 1000 * 3600).await?;
+
+        let id = xid::new();
+        let mut c2 = GroupIndex {
+            cn: xid_to_cn(&id, 0),
+            id,
+            ..Default::default()
+        };
+        c2.save(db, 1000 * 3600).await?;
+
+        let id = xid::new();
+        let mut c3 = GroupIndex {
+            cn: xid_to_cn(&id, 0),
+            id,
+            ..Default::default()
+        };
+        c3.save(db, 1000 * 3600).await?;
+
+        let mut d1 = GroupIndex::with_pk(c1.cn);
+        d1.get_one(db).await?;
+        assert_eq!(d1.id, c1.id);
+        assert_eq!(d1.created_at + 1000 * 3600, d1.expire_at);
+
+        let mut d2 = GroupIndex::with_pk(c2.cn);
+        d2.get_one(db).await?;
+        assert_eq!(d2.id, c2.id);
+        assert_eq!(d2.created_at + 1000 * 3600, d2.expire_at);
+
+        let mut d3 = GroupIndex::with_pk(c3.cn);
+        let res = d3.update_expire(db, c3.created_at - 1).await;
+        assert!(res.is_err());
+        let err: erring::HTTPError = res.unwrap_err().into();
+        assert_eq!(err.code, 400);
+
+        let res = d3.update_expire(db, c3.expire_at).await?;
+        assert!(!res);
+
+        let res = d3.update_expire(db, c3.expire_at + 3600).await?;
+        assert!(res);
+
+        d3.get_one(db).await?;
+        assert_eq!(d3.id, c3.id);
+        assert_eq!(d3.expire_at, c3.expire_at + 3600);
+
+        let new_user = xid::new();
+        let res = d3.reset_cn(db, new_user, 1).await;
+        assert!(res.is_err());
+        let err: erring::HTTPError = res.unwrap_err().into();
+        assert_eq!(err.code, 409);
+
+        let query = "UPDATE group_index SET expire_at=? WHERE cn=? IF EXISTS";
+        let params = (unix_ms() as i64 - 1000 * 3600 * 24 * 365 - 1, &d3.cn);
+        db.execute(query, params).await?;
+
+        let res = d3.reset_cn(db, new_user, 1).await?;
+        assert!(res);
+
+        let res = d3.reset_cn(db, new_user, 1).await?;
+        assert!(!res);
+
+        Ok(())
+    }
+
+    // #[tokio::test(flavor = "current_thread")]
+    async fn group_model_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+        let gid = xid::new();
+        let uid = xid::new();
+
+        // valid_status
+        {
+            let mut doc = Group::with_pk(gid);
+            assert!(doc.valid_status(-3).is_err());
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_ok());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = -1;
+            assert!(doc.valid_status(-2).is_ok());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_err());
+            assert!(doc.valid_status(2).is_err());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = 1;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_ok());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = 2;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_ok());
+            assert!(doc.valid_status(3).is_err());
+        }
+
+        // create
+        {
+            let mut doc = Group::with_pk(gid);
+            doc.uid = uid;
+            doc.name = "Jarvis".to_string();
+
+            let res = doc.get_one(db, vec![]).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 404);
+
+            assert!(doc.save(db).await?);
+            assert_eq!(doc.cn, xid_to_cn(&doc.id, 0));
+
+            let res = doc.save(db).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into(); // can not insert twice
+            assert_eq!(err.code, 409);
+
+            let mut doc2 = Group::with_pk(gid);
+            doc2.get_one(db, vec![]).await?;
+            // println!("doc: {:#?}", doc2);
+
+            assert_eq!(doc2.name.as_str(), "Jarvis");
+            assert_eq!(doc2.id, doc.id);
+            assert_eq!(doc2.cn, doc.cn);
+
+            let mut doc3 = Group::with_pk(gid);
+            doc3.get_one(db, vec!["name".to_string()]).await?;
+            assert_eq!(doc3.name.as_str(), "Jarvis");
+            assert_eq!(doc3.id, doc.id);
+            assert_eq!(doc3.cn, doc.cn);
+            assert_eq!(doc3._fields, vec!["name", "cn", "uid"]);
+        }
+
+        // update status
+        {
+            let mut doc = Group::with_pk(gid);
+            doc.get_one(db, vec![]).await?;
+
+            let res = doc.update_status(db, 2, doc.updated_at - 1).await;
+            assert!(res.is_err());
+
+            let res = doc.update_status(db, 2, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            assert!(!res);
+        }
+
+        // update kind
+        {
+            let mut doc = Group::with_pk(gid);
+            doc.get_one(db, vec![]).await?;
+            let res = doc.update_kind(db, -2, doc.updated_at).await;
+            assert!(res.is_err());
+            let res = doc.update_kind(db, 5, doc.updated_at).await;
+            assert!(res.is_err());
+
+            let res = doc.update_kind(db, 2, doc.updated_at - 1).await;
+            assert!(res.is_err());
+
+            let res = doc.update_kind(db, 2, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_kind(db, 1, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_kind(db, 1, doc.updated_at).await?;
+            assert!(!res);
+        }
+
+        // update email
+        {
+            let mut doc = Group::with_pk(gid);
+            doc.get_one(db, vec![]).await?;
+
+            let res = doc
+                .update_email(db, "Jarvis@yiwen.ai".to_string(), doc.updated_at)
+                .await;
+            assert!(res.is_err());
+            let res = doc
+                .update_email(db, " jarvis@yiwen.ai".to_string(), doc.updated_at)
+                .await;
+            assert!(res.is_err());
+
+            let res = doc
+                .update_email(db, "jarvis@yiwen.ai".to_string(), doc.updated_at - 1)
+                .await;
+            assert!(res.is_err());
+
+            let res = doc
+                .update_email(db, "jarvis@yiwen.ai".to_string(), doc.updated_at)
+                .await?;
+            assert!(res);
+
+            let res = doc
+                .update_email(db, "jarvis2@yiwen.ai".to_string(), doc.updated_at)
+                .await?;
+            assert!(res);
+
+            let res = doc
+                .update_email(db, "jarvis2@yiwen.ai".to_string(), doc.updated_at)
+                .await?;
+            assert!(!res);
+        }
+
+        // update
+        {
+            let mut doc = Group::with_pk(gid);
+            let mut cols = ColumnsMap::new();
+            cols.set_as("status", &2i8);
+            let res = doc.update(db, cols, 0).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 400); // status is not updatable
+
+            let mut cols = ColumnsMap::new();
+            cols.set_as("name", &"Jarvis 1".to_string());
+            let res = doc.update(db, cols, 1).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409); // updated_at not match
+
+            let mut cols = ColumnsMap::new();
+            cols.set_as("name", &"Jarvis 1".to_string());
+            let res = doc.update(db, cols, doc.updated_at).await?;
+            assert!(res);
+
+            let mut cols = ColumnsMap::new();
+            cols.set_as("name", &"Jarvis 2".to_string());
+            cols.set_as("keywords", &vec!["test".to_string()]);
+            cols.set_as("logo", &"https://s.yiwen.pub/jarvis.png".to_string());
+            cols.set_as(
+                "slogan",
+                &"Translating Knowledge into the Future".to_string(),
+            );
+            cols.set_as("address", &"Shanghai".to_string());
+            cols.set_as("website", &"https://h.yiwen.pub/jarvis".to_string());
+
+            let mut description: Vec<u8> = Vec::new();
+            ciborium::into_writer(
+                &cbor!({
+                    "type" => "doc",
+                    "content" => [{
+                        "type" => "heading",
+                        "attrs" => {
+                            "id" => "Y3T1Ik",
+                            "level" => 1u8,
+                        },
+                        "content" => [{
+                            "type" => "text",
+                            "text" => "Hello World 2",
+                        }],
+                    }],
+                })?,
+                &mut description,
+            )?;
+            cols.set_as("description", &description);
+            let res = doc.update(db, cols, doc.updated_at).await?;
+            assert!(res);
+
+            doc.get_one(db, vec![]).await?;
+            assert_eq!(doc.name.as_str(), "Jarvis 2");
+            assert_eq!(doc.keywords, vec!["test".to_string()]);
+            assert_eq!(doc.logo.as_str(), "https://s.yiwen.pub/jarvis.png");
+            assert_eq!(doc.slogan.as_str(), "Translating Knowledge into the Future");
+            assert_eq!(doc.address.as_str(), "Shanghai");
+            assert_eq!(doc.website.as_str(), "https://h.yiwen.pub/jarvis");
+            assert_eq!(doc.description, description);
+        }
+
+        Ok(())
     }
 }
