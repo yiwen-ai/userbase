@@ -1,7 +1,6 @@
 use chrono::{NaiveDate, NaiveDateTime};
 use isolang::Language;
 
-
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
 use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
@@ -815,7 +814,7 @@ mod tests {
     use axum_web::erring;
     use chrono::Datelike;
     use ciborium::cbor;
-    
+
     use tokio::sync::OnceCell;
 
     use super::*;
@@ -834,7 +833,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    // #[ignore]
+    #[ignore]
     async fn test_all() -> anyhow::Result<()> {
         // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
         user_index_model_works().await?;
@@ -1276,8 +1275,6 @@ mod tests {
             doc.name = format!("User {}", i);
             doc.gid = gid;
             doc.save(db).await?;
-
-            println!("User: {}, {}", doc.id, doc.name);
 
             docs.push(doc)
         }

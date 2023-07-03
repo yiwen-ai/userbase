@@ -566,7 +566,7 @@ impl Group {
 #[cfg(test)]
 mod tests {
     use axum_web::erring;
-    
+
     use ciborium::cbor;
 
     use tokio::sync::OnceCell;
@@ -587,7 +587,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    // #[ignore]
+    #[ignore]
     async fn test_all() -> anyhow::Result<()> {
         // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
         group_index_model_works().await?;

@@ -1,6 +1,3 @@
-
-
-
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
 use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
@@ -11,7 +8,7 @@ use crate::db::{
     scylladb::{extract_applied, Query},
 };
 
-use super::{Group};
+use super::Group;
 
 #[derive(Debug, Default, Clone, CqlOrm)]
 pub struct Member {
@@ -288,19 +285,19 @@ impl Member {
             fields.remove(i);
         }
 
-        let rows = if let Some(id) = page_token {
+        let rows = if let Some(uid) = page_token {
             if role.is_none() {
                 let query = Query::new(format!(
-                "SELECT {} FROM member WHERE gid=? AND uid<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                "SELECT {} FROM member WHERE gid=? AND uid>? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")))
                 .with_page_size(page_size as i32);
-                let params = (gid.to_cql(), id.to_cql(), page_size as i32);
+                let params = (gid.to_cql(), uid.to_cql(), page_size as i32);
                 db.execute_paged(query, params, None).await?
             } else {
                 let query = Query::new(format!(
-                    "SELECT {} FROM member WHERE gid=? AND id<? AND role=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                    "SELECT {} FROM member WHERE gid=? AND uid>? AND role=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                     fields.clone().join(","))).with_page_size(page_size as i32);
-                let params = (gid.to_cql(), id.to_cql(), role.unwrap(), page_size as i32);
+                let params = (gid.to_cql(), uid.to_cql(), role.unwrap(), page_size as i32);
                 db.execute_paged(query, params, None).await?
             }
         } else if role.is_none() {
@@ -339,17 +336,15 @@ impl Member {
         select_fields: Vec<String>,
         page_size: u16,
         page_token: Option<xid::Id>,
-        status: Option<i8>,
+        priority: Option<i8>,
     ) -> anyhow::Result<Vec<Group>> {
-        let fields = Self::select_fields(select_fields, true)?;
-
         let member_fields = vec![
             "gid".to_string(),
             "role".to_string(),
-            "status".to_string(),
+            "priority".to_string(),
             "created_at".to_string(),
         ];
-        let rows = if status.is_none() {
+        let rows = if priority.is_none() {
             let query = Query::new(format!(
                 "SELECT {} FROM member WHERE uid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 member_fields.clone().join(",")
@@ -359,9 +354,9 @@ impl Member {
             db.execute_paged(query, params, None).await?
         } else {
             let query = Query::new(format!(
-                    "SELECT {} FROM member WHERE uid=? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                    "SELECT {} FROM member WHERE uid=? AND priority=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
                     member_fields.clone().join(","))).with_page_size(1000i32);
-            let params = (uid.to_cql(), status.unwrap(), 1000i32);
+            let params = (uid.to_cql(), priority.unwrap(), 1000i32);
             db.execute_paged(query, params, None).await?
         };
 
@@ -375,19 +370,28 @@ impl Member {
             members.push(doc);
         }
 
-        members.sort_by(|a, b| a.created_at.partial_cmp(&b.created_at).unwrap());
-        if let Some(gid) = page_token {
-            let mut iter = members.split_inclusive(|member| member.gid == gid).skip(1);
-            if let Some(rt) = iter.next() {
-                if !rt.is_empty() {
-                    members = rt.to_vec();
+        members.sort_by(|a, b| b.created_at.partial_cmp(&a.created_at).unwrap());
+        if !members.is_empty() {
+            if let Some(gid) = page_token {
+                if members.last().unwrap().gid >= gid {
+                    members.truncate(0);
+                } else if members.first().unwrap().gid >= gid {
+                    let mut iter = members.split_inclusive(|member| member.gid == gid).skip(1);
+                    if let Some(rt) = iter.next() {
+                        if !rt.is_empty() {
+                            members = rt.to_vec();
+                        }
+                    }
                 }
             }
         }
+
         if members.len() > page_size as usize {
             members.truncate(page_size as usize);
         }
+
         let mut res: Vec<Group> = Vec::with_capacity(members.len());
+        let fields = Group::select_fields(select_fields, true)?;
         for m in members {
             let mut doc = Group::with_pk(m.gid);
             doc.get_one(db, fields.clone()).await?;
@@ -398,5 +402,237 @@ impl Member {
         }
 
         Ok(res)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum_web::erring;
+
+    use tokio::sync::OnceCell;
+
+    use super::*;
+    use crate::conf;
+    use crate::db;
+
+    static DB: OnceCell<db::scylladb::ScyllaDB> = OnceCell::const_new();
+
+    async fn get_db() -> &'static db::scylladb::ScyllaDB {
+        DB.get_or_init(|| async {
+            let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
+            let res = db::scylladb::ScyllaDB::new(cfg.scylla, "userbase_test").await;
+            res.unwrap()
+        })
+        .await
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore]
+    async fn test_all() -> anyhow::Result<()> {
+        // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
+        member_model_works().await?;
+        list_members_works().await?;
+        list_groups_works().await?;
+
+        Ok(())
+    }
+
+    // #[tokio::test(flavor = "current_thread")]
+    async fn member_model_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+        let uid = xid::new();
+        let gid = xid::new();
+
+        // create
+        {
+            let mut doc = Member::with_pk(gid, uid);
+            doc.role = 2;
+
+            let res = doc.get_one(db, vec![]).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 404);
+
+            assert!(doc.save(db).await?);
+
+            let res = doc.save(db).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into(); // can not insert twice
+            assert_eq!(err.code, 409);
+
+            let mut doc2 = Member::with_pk(gid, uid);
+            doc2.get_one(db, vec![]).await?;
+            // println!("doc: {:#?}", doc2);
+
+            assert_eq!(doc2.role, doc.role);
+
+            let mut doc3 = Member::with_pk(gid, uid);
+            doc3.get_one(db, vec!["role".to_string()]).await?;
+            assert_eq!(doc3.role, 2i8);
+            assert_eq!(doc3._fields, vec!["role"]);
+        }
+
+        // update role
+        {
+            let mut doc = Member::with_pk(gid, uid);
+            doc.get_one(db, vec![]).await?;
+
+            let res = doc.update_role(db, 2, doc.updated_at - 1).await;
+            assert!(res.is_err());
+
+            let res = doc.update_role(db, 3, doc.updated_at).await;
+            assert!(res.is_err());
+            let res = doc.update_role(db, -3, doc.updated_at).await;
+            assert!(res.is_err());
+
+            let res = doc.update_role(db, 2, doc.updated_at).await?;
+            assert!(!res);
+
+            let res = doc.update_role(db, 1, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_role(db, 1, doc.updated_at).await?;
+            assert!(!res);
+        }
+
+        // update priority
+        {
+            let mut doc = Member::with_pk(gid, uid);
+            doc.get_one(db, vec![]).await?;
+
+            let res = doc.update_priority(db, -2, doc.updated_at).await;
+            assert!(res.is_err());
+            let res = doc.update_priority(db, 3, doc.updated_at).await;
+            assert!(res.is_err());
+
+            let res = doc.update_priority(db, 2, doc.updated_at - 1).await;
+            assert!(res.is_err());
+
+            let res = doc.update_priority(db, 2, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_priority(db, 1, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_priority(db, 1, doc.updated_at).await?;
+            assert!(!res);
+        }
+
+        // delete
+        {
+            let mut doc = Member::with_pk(gid, uid);
+            doc.get_one(db, vec![]).await?;
+
+            let res = doc.delete(db, doc.updated_at).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409);
+
+            let res = doc.update_role(db, -2, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.delete(db, doc.updated_at - 1).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409);
+
+            let res = doc.delete(db, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.delete(db, doc.updated_at).await?;
+            assert!(!res);
+        }
+
+        Ok(())
+    }
+
+    // #[tokio::test(flavor = "current_thread")]
+    async fn list_members_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+        let gid = xid::new();
+
+        let mut docs: Vec<Member> = Vec::new();
+        for _i in 0..10 {
+            let mut doc = Member::with_pk(gid, xid::new());
+            doc.save(db).await?;
+            docs.push(doc)
+        }
+        assert_eq!(docs.len(), 10);
+
+        let first = Member::list_members(db, gid, Vec::new(), 1, None, None).await?;
+        assert_eq!(first.len(), 1);
+
+        let mut first = first[0].to_owned();
+        assert_eq!(first.gid, docs.first().unwrap().gid);
+        assert_eq!(first.uid, docs.first().unwrap().uid);
+
+        first.update_role(db, 1, first.updated_at).await?;
+        let res = Member::list_members(db, gid, vec![], 100, None, None).await?;
+        assert_eq!(res.len(), 10);
+
+        let res = Member::list_members(db, gid, vec![], 100, None, Some(1)).await?;
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].uid, docs.first().unwrap().uid);
+
+        let res = Member::list_members(db, gid, vec![], 5, None, None).await?;
+        assert_eq!(res.len(), 5);
+        assert_eq!(res[4].uid, docs[4].uid);
+
+        let res = Member::list_members(db, gid, vec![], 5, Some(docs[4].uid), None).await?;
+        assert_eq!(res.len(), 5);
+        assert_eq!(res[4].uid, docs[9].uid);
+
+        let res = Member::list_members(db, gid, vec![], 5, Some(docs[4].uid), Some(1)).await?;
+        assert_eq!(res.len(), 0);
+
+        Ok(())
+    }
+
+    // #[tokio::test(flavor = "current_thread")]
+    async fn list_groups_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+        let uid = xid::new();
+
+        let mut docs: Vec<Member> = Vec::new();
+        for i in 0..10 {
+            let mut group = Group::with_pk(xid::new());
+            group.uid = xid::new();
+            group.name = format!("Group {}", i);
+            group.save(db).await?;
+
+            let mut doc = Member::with_pk(group.id, uid);
+            doc.save(db).await?;
+            docs.push(doc)
+        }
+
+        assert_eq!(docs.len(), 10);
+
+        let latest = Member::list_groups(db, uid, Vec::new(), 1, None, None).await?;
+        assert_eq!(latest.len(), 1);
+
+        let latest = latest[0].to_owned();
+        assert_eq!(latest.id, docs.last().unwrap().gid);
+
+        let mut latest = docs[9].to_owned();
+        latest.update_priority(db, 1, latest.updated_at).await?;
+        let res = Member::list_groups(db, uid, vec![], 100, None, None).await?;
+        assert_eq!(res.len(), 10);
+
+        let res = Member::list_groups(db, uid, vec![], 100, None, Some(1)).await?;
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].id, docs.last().unwrap().gid);
+
+        let res = Member::list_groups(db, uid, vec![], 5, None, None).await?;
+        assert_eq!(res.len(), 5);
+        assert_eq!(res[4].id, docs[5].gid);
+
+        let res = Member::list_groups(db, uid, vec![], 5, Some(docs[5].gid), None).await?;
+        assert_eq!(res.len(), 5);
+        assert_eq!(res[4].id, docs[0].gid);
+
+        let res = Member::list_groups(db, uid, vec![], 5, Some(docs[5].gid), Some(1)).await?;
+        assert_eq!(res.len(), 0);
+
+        Ok(())
     }
 }
