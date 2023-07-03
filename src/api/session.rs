@@ -251,7 +251,7 @@ pub async fn renew_token(
     }
 
     if gid != jarvis {
-        let mut authz = db::AuthZ::with_pk(sub, aud);
+        let mut authz = db::AuthZ::with_pk(aud, sub);
         authz
             .get_one(
                 &app.scylla,

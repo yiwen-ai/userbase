@@ -187,7 +187,6 @@ pub async fn exec_cqls(db: &ScyllaDB, cqls: &str) -> anyhow::Result<()> {
 mod tests {
     use crate::conf;
     use crate::db;
-    use chrono::{Datelike, NaiveDate};
     use tokio::sync::OnceCell;
 
     static DB: OnceCell<db::scylladb::ScyllaDB> = OnceCell::const_new();
@@ -203,11 +202,6 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn exec_cqls_works() -> anyhow::Result<()> {
-        let days = NaiveDate::from_ymd_opt(2023, 5, 11)
-            .unwrap()
-            .num_days_from_ce();
-        println!("DAYs {}", days);
-
         let db = get_db().await;
         db.init_tables_for_test().await?;
         db.init_data().await?;

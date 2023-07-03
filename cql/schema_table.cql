@@ -114,15 +114,15 @@ CREATE TABLE IF NOT EXISTS authn (
 CREATE INDEX authn_uid ON authn (uid);
 
 CREATE TABLE IF NOT EXISTS authz (
-    sub        UUID,      -- subject - user unique id from provider, crate::crypto::MacId
     aud        BLOB,      -- audience - app id, a robot user who created by a group
+    sub        UUID,      -- subject - user unique id from provider, crate::crypto::MacId
     uid        BLOB,      -- user id
     created_at BIGINT,    -- create at, unix time, ms
     updated_at BIGINT,    -- update at
     expire_at  BIGINT,    -- expire at, unix time, ms
     scope      SET<TEXT>, -- optional, Oauth2 scope
     ip         TEXT,      -- optional, last access ip
-    PRIMARY KEY (sub, aud)
+    PRIMARY KEY ((aud, sub))
 ) WITH caching = {'enabled': 'true'}
     AND comment = 'authorizations'
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}

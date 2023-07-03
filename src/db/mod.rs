@@ -1,13 +1,17 @@
-mod model_auth;
+mod model_authn;
+mod model_authz;
 mod model_group;
 mod model_member;
+mod model_session;
 mod model_user;
 
 pub mod scylladb;
 
-pub use model_auth::{AuthN, AuthZ, Session};
+pub use model_authn::AuthN;
+pub use model_authz::AuthZ;
 pub use model_group::{Group, GroupIndex};
 pub use model_member::Member;
+pub use model_session::Session;
 pub use model_user::{User, UserIndex};
 
 pub static USER_JARVIS: &str = "0000000000000jarvis0"; // system user
