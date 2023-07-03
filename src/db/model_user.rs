@@ -1,4 +1,6 @@
+use chrono::{NaiveDate, NaiveDateTime};
 use isolang::Language;
+
 
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
@@ -33,7 +35,7 @@ impl UserIndex {
         self._fields = Self::fields();
 
         let query = "SELECT id,created_at,expire_at FROM user_index WHERE cn=? LIMIT 1";
-        let params = (&self.cn,);
+        let params = (&self.cn.to_lowercase(),);
         let res = db.execute(query, params).await?.single_row()?;
 
         let mut cols = ColumnsMap::with_capacity(2);
@@ -57,10 +59,15 @@ impl UserIndex {
         self.expire_at = now + expire_ms;
         let query =
             "INSERT INTO user_index (cn,id,created_at,expire_at) VALUES (?,?,?,?) IF NOT EXISTS";
-        let params = (&self.cn, self.id.to_cql(), self.created_at, self.expire_at);
+        let params = (
+            &self.cn.to_lowercase(),
+            self.id.to_cql(),
+            self.created_at,
+            self.expire_at,
+        );
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
-            return Err(HTTPError::new(409, format!("{} already exists", self.id)).into());
+            return Err(HTTPError::new(409, format!("{} already exists", self.cn)).into());
         }
 
         Ok(true)
@@ -86,7 +93,7 @@ impl UserIndex {
         }
 
         let query = "UPDATE user_index SET expire_at=? WHERE cn=? IF EXISTS";
-        let params = (expire_at, &self.cn);
+        let params = (expire_at, &self.cn.to_lowercase());
 
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
@@ -104,9 +111,19 @@ impl UserIndex {
         Ok(true)
     }
 
-    async fn reset_cn(&mut self, db: &scylladb::ScyllaDB, id: xid::Id) -> anyhow::Result<bool> {
+    async fn reset_cn(
+        &mut self,
+        db: &scylladb::ScyllaDB,
+        id: xid::Id,
+        expire_at: i64,
+    ) -> anyhow::Result<bool> {
         self.get_one(db).await?;
+        if self.id == id {
+            return Ok(false); // no need to update
+        }
+
         let now = unix_ms() as i64;
+        // 过期一年才能被重置
         if self.expire_at == 0 || self.expire_at + 1000 * 3600 * 24 * 365 > now {
             return Err(HTTPError::new(
                 409,
@@ -118,12 +135,9 @@ impl UserIndex {
             .into());
         }
 
-        if self.id == id {
-            return Ok(false); // no need to update
-        }
-
+        self.expire_at = now + expire_at;
         let query = "UPDATE user_index SET id=?,expire_at=? WHERE cn=? IF EXISTS";
-        let params = (id.to_cql(), self.expire_at, &self.cn);
+        let params = (id.to_cql(), self.expire_at, &self.cn.to_lowercase());
 
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
@@ -148,14 +162,14 @@ pub struct User {
     pub cn: String, // should be lowercase
     pub gid: xid::Id,
     pub status: i8,
-    pub rating: i8,
     pub kind: i8,
+    pub rating: i8,
     pub created_at: i64,
     pub updated_at: i64,
     pub email: String,
     pub phone: String,
     pub name: String,
-    pub birthdate: String, // yyyy-mm-dd
+    pub birthdate: i32,
     pub locale: Language,
     pub picture: String,
     pub address: String,
@@ -266,6 +280,30 @@ impl User {
         }
     }
 
+    pub fn get_rating(&self) -> i8 {
+        if self.rating > 0 || self.birthdate <= 0 {
+            return self.rating;
+        }
+
+        let nowdate = NaiveDateTime::from_timestamp_millis(unix_ms() as i64)
+            .unwrap()
+            .date();
+        let birthdate = NaiveDate::from_num_days_from_ce_opt(self.birthdate).unwrap_or_default();
+
+        // TODO，如何定级？
+        //    - G (General Audience - 全年龄适宜)
+        //    - PG (Parental Guidance)
+        //    - PG-13 (Parents Strongly Cautioned)
+        //    - R (Restricted)
+        //    - NC-17 (Adults Only - 仅限成人)
+        match nowdate.years_since(birthdate).unwrap_or(0) {
+            18.. => 3,
+            13.. => 2,
+            8.. => 1,
+            _ => 0,
+        }
+    }
+
     pub async fn get_one(
         &mut self,
         db: &scylladb::ScyllaDB,
@@ -286,6 +324,11 @@ impl User {
     }
 
     pub async fn save(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
+        let mut doc = Self::with_pk(self.id);
+        if doc.get_one(db, vec!["cn".to_string()]).await.is_ok() {
+            return Err(HTTPError::new(409, format!("User {}, {} exists", doc.id, doc.cn)).into());
+        }
+
         let mut i: u8 = 0;
         let expire: i64 = 1000 * 3600 * 24 * 365 * 99; // default CN expire 99 years
         loop {
@@ -306,7 +349,6 @@ impl User {
             }
         }
 
-        self.rating = 3; // R (Restricted - 17岁及以上适宜)
         let fields = Self::fields();
         self._fields = fields.clone();
 
@@ -348,7 +390,6 @@ impl User {
         cn: String,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
-        // TODO: update with UserIndex
         if cn != cn.to_lowercase().trim() {
             return Err(HTTPError::new(400, format!("Invalid cn, {}", cn)).into());
         }
@@ -369,6 +410,13 @@ impl User {
         if self.cn == cn {
             return Ok(false); // no need to update
         }
+
+        let mut doc = UserIndex::with_pk(cn.clone());
+        doc.get_one(db).await?;
+        if doc.id != self.id {
+            return Err(HTTPError::new(409, format!("User {} exists", doc.cn)).into());
+        }
+
         let new_updated_at = unix_ms() as i64;
         let query = "UPDATE user SET cn=?,updated_at=? WHERE id=? IF updated_at=?";
         let params = (cn.to_cql(), new_updated_at, self.id.to_cql(), updated_at);
@@ -437,6 +485,10 @@ impl User {
         rating: i8,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
+        if rating < 0 {
+            return Err(HTTPError::new(400, format!("Invalid rating, {}", rating)).into());
+        }
+
         self.get_one(db, vec!["rating".to_string(), "updated_at".to_string()])
             .await?;
         if self.updated_at != updated_at {
@@ -480,6 +532,10 @@ impl User {
         kind: i8,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
+        if !(-1..=4).contains(&kind) {
+            return Err(HTTPError::new(400, format!("Invalid kind, {}", kind)).into());
+        }
+
         self.get_one(db, vec!["kind".to_string(), "updated_at".to_string()])
             .await?;
         if self.updated_at != updated_at {
@@ -523,6 +579,10 @@ impl User {
         email: String,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
+        if email != email.to_lowercase().trim() {
+            return Err(HTTPError::new(400, format!("Invalid email, {}", email)).into());
+        }
+
         self.get_one(db, vec!["email".to_string(), "updated_at".to_string()])
             .await?;
         if self.updated_at != updated_at {
@@ -566,6 +626,10 @@ impl User {
         phone: String,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
+        if phone != phone.to_lowercase().trim() {
+            return Err(HTTPError::new(400, format!("Invalid phone, {}", phone)).into());
+        }
+
         self.get_one(db, vec!["phone".to_string(), "updated_at".to_string()])
             .await?;
         if self.updated_at != updated_at {
@@ -687,49 +751,576 @@ impl User {
     ) -> anyhow::Result<Vec<User>> {
         let fields = Self::select_fields(select_fields, true)?;
 
-        let rows = if let Some(id) = page_token {
-            if status.is_none() {
-                let query = Query::new(format!(
-                "SELECT {} FROM user WHERE gid=? AND uid<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(",")))
-                .with_page_size(page_size as i32);
-                let params = (gid.to_cql(), id.to_cql(), page_size as i32);
-                db.execute_paged(query, params, None).await?
-            } else {
-                let query = Query::new(format!(
-                    "SELECT {} FROM user WHERE gid=? AND id<? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                    fields.clone().join(","))).with_page_size(page_size as i32);
-                let params = (gid.to_cql(), id.to_cql(), status.unwrap(), page_size as i32);
-                db.execute_paged(query, params, None).await?
-            }
-        } else if status.is_none() {
+        let id_fields = vec!["id".to_string()];
+
+        let rows = if status.is_none() {
             let query = Query::new(format!(
                 "SELECT {} FROM user WHERE gid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(",")
+                id_fields.clone().join(",")
             ))
-            .with_page_size(page_size as i32);
-            let params = (gid.to_cql(), page_size as i32);
-            db.execute_iter(query, params).await?
+            .with_page_size(1000i32);
+            let params = (gid.to_cql(), 1000i32);
+            db.execute_paged(query, params, None).await?
         } else {
             let query = Query::new(format!(
-                "SELECT {} FROM user WHERE gid=? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(",")
-            ))
-            .with_page_size(page_size as i32);
-            let params = (gid.as_bytes(), status.unwrap(), page_size as i32);
-            db.execute_iter(query, params).await?
+                "SELECT {} FROM user WHERE gid=? AND status=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s", id_fields.clone().join(","))).with_page_size(1000i32);
+            let params = (gid.to_cql(), status.unwrap(), 1000i32);
+            db.execute_paged(query, params, None).await?
         };
 
-        let mut res: Vec<User> = Vec::with_capacity(rows.len());
+        let mut users: Vec<User> = Vec::with_capacity(rows.len());
         for row in rows {
             let mut doc = User::default();
-            let mut cols = ColumnsMap::with_capacity(fields.len());
-            cols.fill(row, &fields)?;
+            let mut cols = ColumnsMap::with_capacity(1);
+            cols.fill(row, &id_fields)?;
             doc.fill(&cols);
+            doc._fields = id_fields.clone();
+            users.push(doc);
+        }
+
+        users.sort_by(|a, b| b.id.partial_cmp(&a.id).unwrap());
+        if !users.is_empty() {
+            if let Some(id) = page_token {
+                if users.last().unwrap().id >= id {
+                    users.truncate(0);
+                } else if users.first().unwrap().id >= id {
+                    let mut iter = users.split_inclusive(|u| u.id == id).skip(1);
+                    if let Some(rt) = iter.next() {
+                        if !rt.is_empty() {
+                            users = rt.to_vec();
+                        }
+                    }
+                }
+            }
+        }
+
+        if users.len() > page_size as usize {
+            users.truncate(page_size as usize);
+        }
+
+        let mut res: Vec<User> = Vec::with_capacity(users.len());
+        for u in users {
+            let mut doc = User::with_pk(u.id);
+            doc.get_one(db, fields.clone()).await?;
             doc._fields = fields.clone();
             res.push(doc);
         }
 
         Ok(res)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum_web::erring;
+    use chrono::Datelike;
+    use ciborium::cbor;
+    
+    use tokio::sync::OnceCell;
+
+    use super::*;
+    use crate::conf;
+    use crate::db;
+
+    static DB: OnceCell<db::scylladb::ScyllaDB> = OnceCell::const_new();
+
+    async fn get_db() -> &'static db::scylladb::ScyllaDB {
+        DB.get_or_init(|| async {
+            let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
+            let res = db::scylladb::ScyllaDB::new(cfg.scylla, "userbase_test").await;
+            res.unwrap()
+        })
+        .await
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    // #[ignore]
+    async fn test_all() -> anyhow::Result<()> {
+        // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
+        user_index_model_works().await?;
+        user_model_works().await?;
+        list_group_users_works().await?;
+
+        Ok(())
+    }
+
+    // #[tokio::test(flavor = "current_thread")]
+    async fn user_index_model_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+
+        let id = xid::new();
+        let mut c1 = UserIndex {
+            cn: xid_to_cn(&id, 0),
+            id,
+            ..Default::default()
+        };
+        c1.save(db, 1000 * 3600).await?;
+
+        let id = xid::new();
+        let mut c2 = UserIndex {
+            cn: xid_to_cn(&id, 0),
+            id,
+            ..Default::default()
+        };
+        c2.save(db, 1000 * 3600).await?;
+
+        let id = xid::new();
+        let mut c3 = UserIndex {
+            cn: xid_to_cn(&id, 0),
+            id,
+            ..Default::default()
+        };
+        c3.save(db, 1000 * 3600).await?;
+
+        let mut d1 = UserIndex::with_pk(c1.cn);
+        d1.get_one(db).await?;
+        assert_eq!(d1.id, c1.id);
+        assert_eq!(d1.created_at + 1000 * 3600, d1.expire_at);
+
+        let mut d2 = UserIndex::with_pk(c2.cn);
+        d2.get_one(db).await?;
+        assert_eq!(d2.id, c2.id);
+        assert_eq!(d2.created_at + 1000 * 3600, d2.expire_at);
+
+        let mut d3 = UserIndex::with_pk(c3.cn);
+        let res = d3.update_expire(db, c3.created_at - 1).await;
+        assert!(res.is_err());
+        let err: erring::HTTPError = res.unwrap_err().into();
+        assert_eq!(err.code, 400);
+
+        let res = d3.update_expire(db, c3.expire_at).await?;
+        assert!(!res);
+
+        let res = d3.update_expire(db, c3.expire_at + 3600).await?;
+        assert!(res);
+
+        d3.get_one(db).await?;
+        assert_eq!(d3.id, c3.id);
+        assert_eq!(d3.expire_at, c3.expire_at + 3600);
+
+        let new_user = xid::new();
+        let res = d3.reset_cn(db, new_user, 1).await;
+        assert!(res.is_err());
+        let err: erring::HTTPError = res.unwrap_err().into();
+        assert_eq!(err.code, 409);
+
+        let query = "UPDATE user_index SET expire_at=? WHERE cn=? IF EXISTS";
+        let params = (unix_ms() as i64 - 1000 * 3600 * 24 * 365 - 1, &d3.cn);
+        db.execute(query, params).await?;
+
+        let res = d3.reset_cn(db, new_user, 1).await?;
+        assert!(res);
+
+        let res = d3.reset_cn(db, new_user, 1).await?;
+        assert!(!res);
+
+        Ok(())
+    }
+
+    // #[tokio::test(flavor = "current_thread")]
+    async fn user_model_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+        let uid = xid::new();
+
+        // valid_status
+        {
+            let mut doc = User::with_pk(uid);
+            assert!(doc.valid_status(-3).is_err());
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_ok());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = -1;
+            assert!(doc.valid_status(-2).is_ok());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_err());
+            assert!(doc.valid_status(2).is_err());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = 1;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_ok());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = 2;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_ok());
+            assert!(doc.valid_status(3).is_err());
+        }
+
+        // get_rating
+        {
+            let mut doc = User::with_pk(uid);
+            assert_eq!(doc.get_rating(), 0i8);
+            doc.rating = 1;
+            assert_eq!(doc.get_rating(), 1i8);
+            doc.rating = 0;
+            doc.birthdate = 1;
+            assert_eq!(doc.get_rating(), 3i8);
+
+            let nowyear = NaiveDateTime::from_timestamp_millis(unix_ms() as i64)
+                .unwrap()
+                .date();
+            let nowyear = nowyear.year();
+
+            doc.birthdate = NaiveDate::from_ymd_opt(nowyear - 18, 1, 1)
+                .unwrap()
+                .num_days_from_ce();
+            assert_eq!(doc.get_rating(), 3i8);
+
+            doc.birthdate = NaiveDate::from_ymd_opt(nowyear - 17, 1, 1)
+                .unwrap()
+                .num_days_from_ce();
+            assert_eq!(doc.get_rating(), 2i8);
+
+            doc.birthdate = NaiveDate::from_ymd_opt(nowyear - 12, 1, 1)
+                .unwrap()
+                .num_days_from_ce();
+            assert_eq!(doc.get_rating(), 1i8);
+
+            doc.birthdate = NaiveDate::from_ymd_opt(nowyear - 7, 1, 1)
+                .unwrap()
+                .num_days_from_ce();
+            assert_eq!(doc.get_rating(), 0i8);
+        }
+
+        // create
+        {
+            let mut doc = User::with_pk(uid);
+            doc.gid = uid;
+            doc.name = "Jarvis".to_string();
+            doc.birthdate = NaiveDate::default().num_days_from_ce();
+            doc.locale = Language::Eng;
+
+            let res = doc.get_one(db, vec![]).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 404);
+
+            assert!(doc.save(db).await?);
+            assert_eq!(doc.cn, xid_to_cn(&doc.id, 0));
+            assert_eq!(doc.gid, doc.id);
+
+            let res = doc.save(db).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into(); // can not insert twice
+            assert_eq!(err.code, 409);
+
+            let mut doc2 = User::with_pk(uid);
+            doc2.get_one(db, vec![]).await?;
+            // println!("doc: {:#?}", doc2);
+
+            assert_eq!(doc2.name.as_str(), "Jarvis");
+            assert_eq!(doc2.locale, Language::Eng);
+            assert_eq!(doc2.id, doc.gid);
+            assert_eq!(doc2.cn, doc.cn);
+
+            let mut doc3 = User::with_pk(uid);
+            doc3.get_one(db, vec!["name".to_string()]).await?;
+            assert_eq!(doc3.name.as_str(), "Jarvis");
+            assert_eq!(doc3.locale, Language::default());
+            assert_eq!(doc3.id, doc.gid);
+            assert_eq!(doc3.cn, doc.cn);
+            assert_eq!(doc3._fields, vec!["name", "cn", "gid"]);
+        }
+
+        // update_cn
+        {
+            let mut doc = User::with_pk(uid);
+            doc.get_one(db, vec![]).await?;
+
+            let cn = doc.cn.clone() + "jarvis";
+
+            let res = doc
+                .update_cn(db, "Jarvis".to_string(), doc.updated_at)
+                .await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 400);
+
+            let res = doc.update_cn(db, cn.clone(), doc.updated_at - 1).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409);
+
+            let res = doc.update_cn(db, doc.cn.clone(), doc.updated_at).await?;
+            assert!(!res);
+
+            let res = doc
+                .update_cn(db, "jarvis".to_string(), doc.updated_at - 1)
+                .await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409);
+
+            let res = doc.update_cn(db, cn.clone(), doc.updated_at).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 404);
+
+            let mut index = UserIndex {
+                cn: cn.clone(),
+                id: uid,
+                ..Default::default()
+            };
+            index.save(db, 1000 * 3600).await?;
+            let res = doc.update_cn(db, cn.clone(), doc.updated_at).await?;
+            assert!(res);
+        }
+
+        // update status
+        {
+            let mut doc = User::with_pk(uid);
+            doc.get_one(db, vec![]).await?;
+
+            let res = doc.update_status(db, 2, doc.updated_at - 1).await;
+            assert!(res.is_err());
+
+            let res = doc.update_status(db, 2, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            assert!(!res);
+        }
+
+        // update rating
+        {
+            let mut doc = User::with_pk(uid);
+            doc.get_one(db, vec![]).await?;
+
+            let res = doc.update_rating(db, -1, doc.updated_at).await;
+            assert!(res.is_err());
+
+            let res = doc.update_rating(db, 2, doc.updated_at - 1).await;
+            assert!(res.is_err());
+
+            let res = doc.update_rating(db, 2, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_rating(db, 1, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_rating(db, 1, doc.updated_at).await?;
+            assert!(!res);
+        }
+
+        // update kind
+        {
+            let mut doc = User::with_pk(uid);
+            doc.get_one(db, vec![]).await?;
+            let res = doc.update_kind(db, -2, doc.updated_at).await;
+            assert!(res.is_err());
+            let res = doc.update_kind(db, 5, doc.updated_at).await;
+            assert!(res.is_err());
+
+            let res = doc.update_kind(db, 2, doc.updated_at - 1).await;
+            assert!(res.is_err());
+
+            let res = doc.update_kind(db, 2, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_kind(db, 1, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_kind(db, 1, doc.updated_at).await?;
+            assert!(!res);
+        }
+
+        // update email
+        {
+            let mut doc = User::with_pk(uid);
+            doc.get_one(db, vec![]).await?;
+
+            let res = doc
+                .update_email(db, "Jarvis@yiwen.ai".to_string(), doc.updated_at)
+                .await;
+            assert!(res.is_err());
+            let res = doc
+                .update_email(db, " jarvis@yiwen.ai".to_string(), doc.updated_at)
+                .await;
+            assert!(res.is_err());
+
+            let res = doc
+                .update_email(db, "jarvis@yiwen.ai".to_string(), doc.updated_at - 1)
+                .await;
+            assert!(res.is_err());
+
+            let res = doc
+                .update_email(db, "jarvis@yiwen.ai".to_string(), doc.updated_at)
+                .await?;
+            assert!(res);
+
+            let res = doc
+                .update_email(db, "jarvis2@yiwen.ai".to_string(), doc.updated_at)
+                .await?;
+            assert!(res);
+
+            let res = doc
+                .update_email(db, "jarvis2@yiwen.ai".to_string(), doc.updated_at)
+                .await?;
+            assert!(!res);
+        }
+
+        // update phone
+        {
+            let mut doc = User::with_pk(uid);
+            doc.get_one(db, vec![]).await?;
+
+            let res = doc
+                .update_phone(db, "+86 18812345678 ".to_string(), doc.updated_at)
+                .await;
+            assert!(res.is_err());
+
+            let res = doc
+                .update_phone(db, "+86 18812345678".to_string(), doc.updated_at - 1)
+                .await;
+            assert!(res.is_err());
+
+            let res = doc
+                .update_phone(db, "+86 18812345678".to_string(), doc.updated_at)
+                .await?;
+            assert!(res);
+
+            let res = doc
+                .update_phone(db, "+86 18812345678".to_string(), doc.updated_at)
+                .await?;
+            assert!(!res);
+        }
+
+        // update
+        {
+            let mut doc = User::with_pk(uid);
+            let mut cols = ColumnsMap::new();
+            cols.set_as("status", &2i8);
+            let res = doc.update(db, cols, 0).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 400); // status is not updatable
+
+            let mut cols = ColumnsMap::new();
+            cols.set_as("name", &"Jarvis 1".to_string());
+            let res = doc.update(db, cols, 1).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409); // updated_at not match
+
+            let mut cols = ColumnsMap::new();
+            cols.set_as("name", &"Jarvis 1".to_string());
+            let res = doc.update(db, cols, doc.updated_at).await?;
+            assert!(res);
+
+            let mut cols = ColumnsMap::new();
+            cols.set_as("name", &"Jarvis 2".to_string());
+            cols.set_as("birthdate", &730000i32);
+            cols.set_as("locale", &Language::Zho);
+            cols.set_as("picture", &"https://s.yiwen.pub/jarvis.png".to_string());
+            cols.set_as("address", &"Shanghai".to_string());
+            cols.set_as("website", &"https://h.yiwen.pub/jarvis".to_string());
+
+            let mut bio: Vec<u8> = Vec::new();
+            ciborium::into_writer(
+                &cbor!({
+                    "type" => "doc",
+                    "content" => [{
+                        "type" => "heading",
+                        "attrs" => {
+                            "id" => "Y3T1Ik",
+                            "level" => 1u8,
+                        },
+                        "content" => [{
+                            "type" => "text",
+                            "text" => "Hello World 2",
+                        }],
+                    }],
+                })?,
+                &mut bio,
+            )?;
+            cols.set_as("bio", &bio);
+            let res = doc.update(db, cols, doc.updated_at).await?;
+            assert!(res);
+
+            doc.get_one(db, vec![]).await?;
+            assert_eq!(doc.name.as_str(), "Jarvis 2");
+            assert_eq!(doc.birthdate, 730000i32);
+            assert_eq!(doc.locale, Language::Zho);
+            assert_eq!(doc.picture.as_str(), "https://s.yiwen.pub/jarvis.png");
+            assert_eq!(doc.address.as_str(), "Shanghai");
+            assert_eq!(doc.website.as_str(), "https://h.yiwen.pub/jarvis");
+            assert_eq!(doc.bio, bio);
+        }
+
+        Ok(())
+    }
+
+    // #[tokio::test(flavor = "current_thread")]
+    async fn list_group_users_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+        let gid = xid::new();
+
+        let mut docs: Vec<User> = Vec::new();
+        for i in 0..10 {
+            let mut doc = User::with_pk(xid::new());
+            doc.name = format!("User {}", i);
+            doc.gid = gid;
+            doc.save(db).await?;
+
+            println!("User: {}, {}", doc.id, doc.name);
+
+            docs.push(doc)
+        }
+        assert_eq!(docs.len(), 10);
+
+        let latest = User::list_group_users(db, gid, Vec::new(), 1, None, None).await?;
+        assert_eq!(latest.len(), 1);
+
+        let mut latest = latest[0].to_owned();
+        assert_eq!(latest.gid, docs.last().unwrap().gid);
+        assert_eq!(latest.id, docs.last().unwrap().id);
+
+        latest.update_status(db, 1, latest.updated_at).await?;
+        let res =
+            User::list_group_users(db, gid, vec!["name".to_string()], 100, None, None).await?;
+        assert_eq!(res.len(), 10);
+
+        let res =
+            User::list_group_users(db, gid, vec!["name".to_string()], 100, None, Some(1)).await?;
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].id, docs.last().unwrap().id);
+
+        let res = User::list_group_users(db, gid, vec!["name".to_string()], 5, None, None).await?;
+        assert_eq!(res.len(), 5);
+        assert_eq!(res[4].id, docs[5].id);
+
+        let res =
+            User::list_group_users(db, gid, vec!["name".to_string()], 5, Some(docs[5].id), None)
+                .await?;
+        assert_eq!(res.len(), 5);
+        assert_eq!(res[4].id, docs[0].id);
+
+        let res = User::list_group_users(
+            db,
+            gid,
+            vec!["name".to_string()],
+            5,
+            Some(docs[5].id),
+            Some(1),
+        )
+        .await?;
+        assert_eq!(res.len(), 0);
+
+        Ok(())
     }
 }

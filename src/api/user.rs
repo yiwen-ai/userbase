@@ -2,8 +2,10 @@ use axum::{
     extract::{Query, State},
     Extension,
 };
+use chrono::{Datelike, NaiveDate, NaiveDateTime};
 use isolang::Language;
 use serde::{Deserialize, Serialize};
+use std::ops::Add;
 use std::{convert::From, sync::Arc};
 use validator::Validate;
 
@@ -23,6 +25,7 @@ pub struct CreateUserInput {
     pub locale: PackObject<Language>,
     #[validate(url)]
     pub picture: Option<String>,
+    pub birthdate: Option<String>,
     pub gid: Option<PackObject<xid::Id>>,
 }
 
@@ -80,7 +83,11 @@ impl UserOutput {
                 "email" => rt.email = Some(val.email.to_owned()),
                 "phone" => rt.phone = Some(val.phone.to_owned()),
                 "name" => rt.name = Some(val.name.to_owned()),
-                "birthdate" => rt.birthdate = Some(val.birthdate.to_owned()),
+                "birthdate" => {
+                    let birthdate =
+                        NaiveDate::from_num_days_from_ce_opt(val.birthdate).unwrap_or_default();
+                    rt.birthdate = Some(birthdate.format("%Y-%m-%d").to_string())
+                }
                 "locale" => rt.locale = Some(to.with(val.locale)),
                 "picture" => rt.picture = Some(val.picture.to_owned()),
                 "address" => rt.address = Some(val.address.to_owned()),
@@ -111,6 +118,25 @@ pub async fn create(
         picture: input.picture.unwrap_or_default(),
         ..Default::default()
     };
+
+    if let Some(birthdate) = input.birthdate {
+        let birthdate = NaiveDate::parse_from_str(&birthdate, "%Y-%m-%d")
+            .map_err(|_| HTTPError::new(400, format!("invalid birthdate {}", &birthdate)))?;
+        let nowdate = NaiveDateTime::from_timestamp_millis(unix_ms() as i64)
+            .unwrap()
+            .date();
+
+        let year = birthdate.year();
+
+        if year <= 1900 || year >= nowdate.year() {
+            return Err(HTTPError::new(
+                400,
+                format!("invalid birthdate {}", &birthdate),
+            ));
+        }
+
+        doc.birthdate = birthdate.num_days_from_ce();
+    }
 
     if doc.gid != doc.id {
         let mut group = db::Group::with_pk(doc.gid);

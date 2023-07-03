@@ -27,7 +27,7 @@ impl GroupIndex {
         self._fields = Self::fields();
 
         let query = "SELECT id,created_at,expire_at FROM group_index WHERE cn=? LIMIT 1";
-        let params = (&self.cn,);
+        let params = (&self.cn.to_lowercase(),);
         let res = db.execute(query, params).await?.single_row()?;
 
         let mut cols = ColumnsMap::with_capacity(2);
@@ -51,10 +51,15 @@ impl GroupIndex {
         self.expire_at = now + expire_ms;
         let query =
             "INSERT INTO group_index (cn,id,created_at,expire_at) VALUES (?,?,?,?) IF NOT EXISTS";
-        let params = (&self.cn, self.id.to_cql(), self.created_at, self.expire_at);
+        let params = (
+            &self.cn.to_lowercase(),
+            self.id.to_cql(),
+            self.created_at,
+            self.expire_at,
+        );
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
-            return Err(HTTPError::new(409, format!("{} already exists", self.id)).into());
+            return Err(HTTPError::new(409, format!("{} already exists", self.cn)).into());
         }
 
         Ok(true)
@@ -80,7 +85,7 @@ impl GroupIndex {
         }
 
         let query = "UPDATE group_index SET expire_at=? WHERE cn=? IF EXISTS";
-        let params = (expire_at, &self.cn);
+        let params = (expire_at, &self.cn.to_lowercase());
 
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
@@ -98,8 +103,17 @@ impl GroupIndex {
         Ok(true)
     }
 
-    async fn reset_cn(&mut self, db: &scylladb::ScyllaDB, id: xid::Id) -> anyhow::Result<bool> {
+    async fn reset_cn(
+        &mut self,
+        db: &scylladb::ScyllaDB,
+        id: xid::Id,
+        expire_at: i64,
+    ) -> anyhow::Result<bool> {
         self.get_one(db).await?;
+        if self.id == id {
+            return Ok(false); // no need to update
+        }
+
         let now = unix_ms() as i64;
         if self.expire_at == 0 || self.expire_at + 1000 * 3600 * 24 * 365 > now {
             return Err(HTTPError::new(
@@ -112,12 +126,9 @@ impl GroupIndex {
             .into());
         }
 
-        if self.id == id {
-            return Ok(false); // no need to update
-        }
-
+        self.expire_at = now + expire_at;
         let query = "UPDATE group_index SET id=?,expire_at=? WHERE cn=? IF EXISTS";
-        let params = (id.to_cql(), self.expire_at, &self.cn);
+        let params = (id.to_cql(), self.expire_at, &self.cn.to_lowercase());
 
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
@@ -281,6 +292,11 @@ impl Group {
     }
 
     pub async fn save(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
+        let mut doc = Self::with_pk(self.id);
+        if doc.get_one(db, vec!["cn".to_string()]).await.is_ok() {
+            return Err(HTTPError::new(409, format!("Group {}, {} exists", doc.id, doc.cn)).into());
+        }
+
         let mut i: u8 = 0;
         let expire: i64 = 1000 * 3600 * 24 * 365 * 99; // default CN expire 99 years
         loop {
@@ -359,6 +375,7 @@ impl Group {
         if self.status == status {
             return Ok(false); // no need to update
         }
+
         let new_updated_at = unix_ms() as i64;
         let query = "UPDATE group SET status=?,updated_at=? WHERE id=? IF updated_at=?";
         let params = (status, new_updated_at, self.id.to_cql(), updated_at);

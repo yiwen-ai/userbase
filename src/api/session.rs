@@ -74,20 +74,14 @@ pub async fn min_verify(
         ));
     }
 
-    let mut output = SessionVerifyOutput {
-        uid: None,
-        sub: None,
+    let output = SessionVerifyOutput {
+        uid: Some(to.with(uid)),
+        sub: sub.map(|v| to.with(v)),
         access_token: None,
         id_token: None,
         expires_in: None,
     };
 
-    if sub.is_some() {
-        // sub is not None, means it's a session from app
-        output.sub = Some(to.with(sub.unwrap()));
-    } else {
-        output.uid = Some(to.with(uid));
-    }
     Ok(to.with(SuccessResponse::new(output)))
 }
 
@@ -138,20 +132,14 @@ pub async fn verify(
             format!("{} user, id {}", user.status_name(), user.id),
         ));
     }
-    let mut output = SessionVerifyOutput {
-        uid: None,
-        sub: None,
+
+    let output = SessionVerifyOutput {
+        uid: Some(to.with(uid)),
+        sub: sub.map(|v| to.with(v)),
         access_token: None,
         id_token: None,
         expires_in: None,
     };
-
-    if sub.is_some() {
-        // sub is not None, means it's a session from app
-        output.sub = Some(to.with(sub.unwrap()));
-    } else {
-        output.uid = Some(to.with(uid));
-    }
     Ok(to.with(SuccessResponse::new(output)))
 }
 
@@ -289,6 +277,7 @@ pub async fn renew_token(
             "status".to_string(),
             "rating".to_string(),
             "kind".to_string(),
+            "birthdate".to_string(),
         ],
     )
     .await
@@ -312,7 +301,7 @@ pub async fn renew_token(
         sid,
         uid: user.id,
         status: user.status,
-        rating: user.rating,
+        rating: user.get_rating(),
         kind: user.kind,
         ..Default::default()
     };

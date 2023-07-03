@@ -16,14 +16,14 @@ CREATE TABLE IF NOT EXISTS user (
     cn         TEXT,    -- user common name, globally unique
     gid        BLOB,    -- optional, group id who create the user. The group owners has full control over these users.
     status     TINYINT, -- int8, -2: Disabled -1: Suspended, 0: Normal, 1: Verified, 2: Protected
-    rating     TINYINT, -- int8, rating of content that user can view.
     kind       TINYINT, -- int8, -1: Robot, 0: Human, 1: Organization, 2: Corporation, 3: Education, 4: Government
+    rating     TINYINT, -- int8, rating of content that user can view.
     created_at BIGINT,  -- create at
     updated_at BIGINT,  -- update at
     email      TEXT,
     phone      TEXT,
     name       TEXT,    -- display name
-    birthdate  DATE,
+    birthdate  INT,    -- day’s number in the proleptic Gregorian calendar, with January 1, 1 being day 1.
     locale     TEXT,    -- language user preferred, ISO 639-3
     picture    TEXT,
     address    TEXT,
