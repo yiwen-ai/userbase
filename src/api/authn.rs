@@ -3,7 +3,7 @@ use axum::{
     Extension,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, convert::From, sync::Arc};
+use std::{collections::HashSet, convert::From, str::FromStr, sync::Arc};
 use validator::Validate;
 
 use axum_web::context::{unix_ms, ReqContext};
@@ -11,7 +11,7 @@ use axum_web::erring::{HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
-use crate::api::AppState;
+use crate::api::{self, AppState};
 
 use crate::db;
 
@@ -23,20 +23,23 @@ pub struct AuthNInput {
     pub aud: String,
     #[validate(length(min = 3, max = 60))]
     pub sub: String,
-    pub uid: PackObject<xid::Id>,
     pub expires_in: i32,
     pub scope: HashSet<String>,
     pub ip: String,
     pub payload: PackObject<Vec<u8>>,
     pub device_id: String,
     pub device_desc: String,
+    pub user: api::user::CreateUserInput,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct AuthNLoginOutput {
     pub sid: PackObject<xid::Id>,
     pub uid: PackObject<xid::Id>,
+    pub sub: PackObject<uuid::Uuid>,
     pub session: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_created_at: Option<i64>,
 }
 
 pub async fn login_or_new(
@@ -47,57 +50,49 @@ pub async fn login_or_new(
     let (to, input) = to.unpack();
     input.validate()?;
 
-    let uid = input.uid.unwrap();
     let expire_at: i64 = unix_ms() as i64 + input.expires_in as i64;
     ctx.set_kvs(vec![
         ("action", "login_or_new".into()),
         ("idp", input.idp.clone().into()),
         ("aud", input.aud.clone().into()),
         ("sub", input.sub.clone().into()),
-        ("uid", uid.to_string().into()),
     ])
     .await;
 
-    let mut user = db::User::with_pk(uid);
-    user.get_one(
-        &app.scylla,
-        vec![
-            "status".to_string(),
-            "rating".to_string(),
-            "kind".to_string(),
-        ],
-    )
-    .await
-    .map_err(|e| HTTPError::new(404, format!("Invalid user, {}", e)))?;
-    if user.status < 0 {
-        return Err(HTTPError::new(
-            403,
-            format!("{} user, id {}", user.status_name(), user.id),
-        ));
-    }
-
+    let mut user_created_at: Option<i64> = None;
     let mut doc = db::AuthN::with_pk(input.idp.clone(), input.aud.clone(), input.sub.clone());
     match doc.get_one(&app.scylla, vec!["uid".to_string()]).await {
         Ok(_) => {
-            // update
-            if doc.uid != uid {
+            // check user and update
+            let mut user = db::User::with_pk(doc.uid);
+            user.get_one(
+                &app.scylla,
+                vec![
+                    "status".to_string(),
+                    "rating".to_string(),
+                    "kind".to_string(),
+                ],
+            )
+            .await
+            .map_err(|e| HTTPError::new(404, format!("Invalid user, {}", e)))?;
+            if user.status < -1 {
                 return Err(HTTPError::new(
-                    409,
-                    format!(
-                        "Invalid authorization, uid not match, expected {}, got {}",
-                        doc.uid, uid
-                    ),
+                    403,
+                    format!("{} user, id {}", user.status_name(), user.id),
                 ));
             }
+
             let mut cols = ColumnsMap::new();
             cols.set_as("expire_at", &expire_at);
             cols.set_as("scope", &input.scope);
             cols.set_as("ip", &input.ip);
             cols.set_as("payload", &input.payload.unwrap());
-            let _ = doc.update(&app.scylla, cols, uid).await;
+            let _ = doc.update(&app.scylla, cols, doc.uid).await;
         }
         Err(_) => {
-            doc.uid = uid;
+            let user = api::user::internal_create(app.clone(), input.user).await?;
+            user_created_at = Some(user.created_at);
+            doc.uid = user.id;
             doc.expire_at = expire_at;
             doc.scope = input.scope;
             doc.ip = input.ip.clone();
@@ -106,23 +101,51 @@ pub async fn login_or_new(
         }
     };
 
-    let mut session = db::Session {
-        id: xid::new(),
-        uid,
-        device_id: input.device_id,
-        device_desc: input.device_desc,
-        idp: input.idp,
-        aud: input.aud,
-        sub: input.sub,
-        ..Default::default()
+    let existing_sess = db::Session::find_by_authn(
+        &app.scylla,
+        doc.uid,
+        &input.device_id,
+        &input.idp,
+        &input.aud,
+        &input.sub,
+    )
+    .await;
+
+    let session = match existing_sess {
+        Ok(sess) => {
+            let mut sess = sess;
+            sess.renew(&app.scylla).await?;
+            sess
+        }
+        Err(_) => {
+            let mut sess = db::Session {
+                id: xid::new(),
+                uid: doc.uid,
+                device_id: input.device_id,
+                device_desc: input.device_desc,
+                idp: input.idp,
+                aud: input.aud,
+                sub: input.sub,
+                ..Default::default()
+            };
+
+            if sess.device_id.is_empty() {
+                sess.device_id = sess.id.to_string();
+            }
+            sess.save(&app.scylla, input.expires_in).await?;
+            sess
+        }
     };
 
-    session.save(&app.scylla, input.expires_in).await?;
-    let sess = app.session.session(&session.id, &uid, None);
+    let jarvis = xid::Id::from_str(db::USER_JARVIS).unwrap();
+    let sub = app.mac_id.uuid(&jarvis, &doc.uid);
+    let sess = app.session.session(&session.id, &doc.uid, None);
     Ok(to.with(SuccessResponse::new(AuthNLoginOutput {
         sid: to.with(session.id),
-        uid: to.with(uid),
+        uid: to.with(doc.uid),
+        sub: to.with(sub),
         session: sess,
+        user_created_at,
     })))
 }
 
@@ -204,6 +227,17 @@ pub struct AuthNPKInput {
     pub fields: Option<String>,
 }
 
+impl AuthNPKInput {
+    pub fn get_fields(&self) -> Vec<String> {
+        let fields = self.fields.clone().unwrap_or_default();
+        if fields.is_empty() {
+            vec![]
+        } else {
+            fields.split(',').map(|s| s.to_string()).collect()
+        }
+    }
+}
+
 pub async fn delete(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
@@ -244,13 +278,6 @@ pub async fn get(
     .await;
 
     let mut doc = db::AuthN::with_pk(input.idp.clone(), input.aud.clone(), input.sub.clone());
-    let fields = input
-        .fields
-        .clone()
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.to_string())
-        .collect();
-    doc.get_one(&app.scylla, fields).await?;
+    doc.get_one(&app.scylla, input.get_fields()).await?;
     Ok(to.with(SuccessResponse::new(AuthNOutput::from(doc, &to))))
 }

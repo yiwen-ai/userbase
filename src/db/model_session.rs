@@ -233,6 +233,44 @@ impl Session {
         res.sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
         Ok(res)
     }
+
+    pub async fn find_by_authn(
+        db: &scylladb::ScyllaDB,
+        uid: xid::Id,
+        device_id: &str,
+        idp: &str,
+        aud: &str,
+        sub: &str,
+    ) -> anyhow::Result<Session> {
+        let fields = Self::select_fields(vec![], true)?;
+
+        // 正常情况下应该只有 0～1 条数据
+        let query = format!(
+            "SELECT {} FROM session WHERE uid=? AND device_id=? AND idp=? AND aud=? AND sub=? LIMIT 2 ALLOW FILTERING USING TIMEOUT 3s",
+            fields.clone().join(",")
+        );
+        let params = (uid.to_cql(), device_id, idp, aud, sub);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut res: Vec<Session> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = Session::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            res.push(doc);
+        }
+
+        res.sort_by(|a, b| b.id.partial_cmp(&a.id).unwrap());
+        if res.is_empty() {
+            return Err(
+                HTTPError::new(404, format!("session {}, {} not found", uid, device_id)).into(),
+            );
+        }
+
+        Ok(res[0].to_owned())
+    }
 }
 
 #[cfg(test)]

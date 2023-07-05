@@ -94,11 +94,8 @@ mod tests {
             base64url_encode(&data),
         )?;
         let data = wrap_cbor_tag(&token_pub.to_vec()?); // don't need to encrypt public key
-        fs::write(keys_path.join("encrypted-ed25519-token.pub.cbor"), &data)?;
-        fs::write(
-            keys_path.join("encrypted-ed25519-token.pub"),
-            base64url_encode(&data),
-        )?;
+        fs::write(keys_path.join("ed25519-token.pub.cbor"), &data)?;
+        fs::write(keys_path.join("ed25519-token.pub"), base64url_encode(&data))?;
 
         let encryptor = Encrypt0::new(mkek.try_into().unwrap(), b"20230511");
         let data = encryptor.encrypt(&kek.to_vec()?, aad)?;

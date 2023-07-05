@@ -84,9 +84,13 @@ impl UserOutput {
                 "phone" => rt.phone = Some(val.phone.to_owned()),
                 "name" => rt.name = Some(val.name.to_owned()),
                 "birthdate" => {
-                    let birthdate =
-                        NaiveDate::from_num_days_from_ce_opt(val.birthdate).unwrap_or_default();
-                    rt.birthdate = Some(birthdate.format("%Y-%m-%d").to_string())
+                    rt.birthdate = if val.birthdate > 0 {
+                        let birthdate =
+                            NaiveDate::from_num_days_from_ce_opt(val.birthdate).unwrap_or_default();
+                        Some(birthdate.format("%Y-%m-%d").to_string())
+                    } else {
+                        Some("".to_string())
+                    };
                 }
                 "locale" => rt.locale = Some(to.with(val.locale)),
                 "picture" => rt.picture = Some(val.picture.to_owned()),
@@ -103,12 +107,20 @@ impl UserOutput {
 
 pub async fn create(
     State(app): State<Arc<AppState>>,
-    Extension(ctx): Extension<Arc<ReqContext>>,
+    Extension(_ctx): Extension<Arc<ReqContext>>,
     to: PackObject<CreateUserInput>,
 ) -> Result<PackObject<SuccessResponse<UserOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
 
+    let doc = internal_create(app, input).await?;
+    Ok(to.with(SuccessResponse::new(UserOutput::from(doc, &to))))
+}
+
+pub async fn internal_create(
+    app: Arc<AppState>,
+    input: CreateUserInput,
+) -> Result<db::User, HTTPError> {
     let id = xid::new();
     let mut doc = db::User {
         id,
@@ -152,14 +164,13 @@ pub async fn create(
         doc.kind = group.kind;
     }
 
-    let ok = doc.save(&app.scylla).await?;
+    let _ = doc.save(&app.scylla).await?;
     if doc.id == doc.gid {
         let mut group = db::Group {
             id: doc.id,
             cn: doc.cn.clone(),
             uid: doc.id,
             name: doc.name.clone(),
-            logo: doc.picture.clone(),
             ..Default::default()
         };
         let res = group.save(&app.scylla).await;
@@ -173,15 +184,7 @@ pub async fn create(
         }
     }
 
-    ctx.set_kvs(vec![
-        ("action", "create_user".into()),
-        ("id", doc.id.to_string().into()),
-        ("cn", doc.cn.clone().into()),
-        ("gid", doc.gid.to_string().into()),
-        ("created", ok.into()),
-    ])
-    .await;
-    Ok(to.with(SuccessResponse::new(UserOutput::from(doc, &to))))
+    Ok(doc)
 }
 
 pub async fn get(
@@ -214,14 +217,7 @@ pub async fn get(
     .await;
 
     let mut doc = db::User::with_pk(id);
-    let fields = input
-        .fields
-        .clone()
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.to_string())
-        .collect();
-    doc.get_one(&app.scylla, fields).await?;
+    doc.get_one(&app.scylla, input.get_fields()).await?;
     Ok(to.with(SuccessResponse::new(UserOutput::from(doc, &to))))
 }
 

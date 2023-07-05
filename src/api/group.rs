@@ -164,14 +164,7 @@ pub async fn get(
     .await;
 
     let mut doc = db::Group::with_pk(id);
-    let fields = input
-        .fields
-        .clone()
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.to_string())
-        .collect();
-    doc.get_one(&app.scylla, fields).await?;
+    doc.get_one(&app.scylla, input.get_fields()).await?;
     Ok(to.with(SuccessResponse::new(GroupOutput::from(doc, &to))))
 }
 

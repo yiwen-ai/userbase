@@ -1,7 +1,7 @@
 use axum::{
-    http::{HeaderMap, Request},
+    http::{header, HeaderMap, Request},
     middleware::Next,
-    response::{Response},
+    response::Response,
 };
 use serde_json::Value;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Instant};
@@ -60,6 +60,13 @@ pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
     let res = next.run(req).await;
     let kv = ctx.kv.read().await;
     let status = res.status().as_u16();
+    let headers = res.headers();
+    let ct = headers
+        .get(header::CONTENT_TYPE)
+        .map_or("", |v| v.to_str().unwrap_or_default());
+    let ce = headers
+        .get(header::CONTENT_ENCODING)
+        .map_or("", |v| v.to_str().unwrap_or_default());
     log::info!(target: "api",
         method = method,
         uri = uri,
@@ -69,6 +76,8 @@ pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
         status = status,
         start = ctx.unix_ms,
         elapsed = ctx.start.elapsed().as_millis() as u64,
+        ctype = ct,
+        encoding = ce,
         kv = log::as_serde!(*kv);
         "",
     );

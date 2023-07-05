@@ -19,7 +19,7 @@ use crate::db;
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct SessionInput {
     pub session: String,
-    pub aud: Option<PackObject<xid::Id>>,
+    pub aud: PackObject<xid::Id>,
     #[validate(range(min = 1, max = 31536000))]
     pub expires_in: Option<i32>, // seconds, default to 3600, max to 365 days
 }
@@ -126,7 +126,7 @@ pub async fn verify(
     user.get_one(&app.scylla, vec!["status".to_string()])
         .await
         .map_err(|e| HTTPError::new(401, format!("Invalid user, {}", e)))?;
-    if user.status < 0 {
+    if user.status < -1 {
         return Err(HTTPError::new(
             403,
             format!("{} user, id {}", user.status_name(), user.id),
@@ -151,19 +151,12 @@ pub async fn renew_token(
     let (to, input) = to.unpack();
     input.validate()?;
 
-    if input.aud.is_none() {
-        return Err(HTTPError::new(
-            400,
-            "Invalid input, aud is none".to_string(),
-        ));
-    }
-
     let (sid, uid, sub) = app
         .session
         .from(&input.session)
         .map_err(|e| HTTPError::new(401, format!("Invalid session, {}", e)))?;
 
-    let aud = input.aud.unwrap().unwrap();
+    let aud = input.aud.unwrap();
     let jarvis = xid::Id::from_str(db::USER_JARVIS).unwrap();
     let mut gid = jarvis;
     if aud != jarvis {
@@ -231,26 +224,27 @@ pub async fn renew_token(
             ),
         ));
     }
-    if sess.sub != sub.to_string() {
-        return Err(HTTPError::new(
-            500,
-            format!(
-                "Invalid session, sub not match, expected {}, got {}",
-                sess.sub, sub
-            ),
-        ));
-    }
-    if sess.aud != aud.to_string() {
-        return Err(HTTPError::new(
-            500,
-            format!(
-                "Invalid session, aud not match, expected {}, got {}",
-                sess.aud, aud
-            ),
-        ));
-    }
 
     if gid != jarvis {
+        if sess.sub != sub.to_string() {
+            return Err(HTTPError::new(
+                500,
+                format!(
+                    "Invalid session, sub not match, expected {}, got {}",
+                    sess.sub, sub
+                ),
+            ));
+        }
+        if sess.aud != aud.to_string() {
+            return Err(HTTPError::new(
+                500,
+                format!(
+                    "Invalid session, aud not match, expected {}, got {}",
+                    sess.aud, aud
+                ),
+            ));
+        }
+
         let mut authz = db::AuthZ::with_pk(aud, sub);
         authz
             .get_one(
@@ -282,7 +276,7 @@ pub async fn renew_token(
     )
     .await
     .map_err(|e| HTTPError::new(401, format!("Invalid user, {}", e)))?;
-    if user.status < 0 {
+    if user.status < -1 {
         return Err(HTTPError::new(
             403,
             format!("{} user, id {}", user.status_name(), user.id),
@@ -442,14 +436,7 @@ pub async fn get(
     .await;
 
     let mut doc = db::Session::with_pk(sid);
-    let fields = input
-        .fields
-        .clone()
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.to_string())
-        .collect();
-    doc.get_one(&app.scylla, fields).await?;
+    doc.get_one(&app.scylla, input.get_fields()).await?;
     Ok(to.with(SuccessResponse::new(SessionOutput::from(doc, &to))))
 }
 
@@ -583,7 +570,7 @@ pub async fn verify_token(
     )
     .await
     .map_err(|_| HTTPError::new(401, format!("Invalid user, {}", token.uid)))?;
-    if user.status < 0 {
+    if user.status < -1 {
         return Err(HTTPError::new(
             403,
             format!("{} user, id {}", user.status_name(), user.id),

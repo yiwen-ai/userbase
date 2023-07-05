@@ -76,6 +76,17 @@ pub struct QueryIdCn {
     pub fields: Option<String>,
 }
 
+impl QueryIdCn {
+    pub fn get_fields(&self) -> Vec<String> {
+        let fields = self.fields.clone().unwrap_or_default();
+        if fields.is_empty() {
+            vec![]
+        } else {
+            fields.split(',').map(|s| s.to_string()).collect()
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Validate)]
 pub struct QueryGidUid {
     pub gid: PackObject<xid::Id>,
@@ -87,6 +98,17 @@ pub struct QueryGidUid {
 pub struct QuerySid {
     pub sid: PackObject<xid::Id>,
     pub fields: Option<String>,
+}
+
+impl QuerySid {
+    pub fn get_fields(&self) -> Vec<String> {
+        let fields = self.fields.clone().unwrap_or_default();
+        if fields.is_empty() {
+            vec![]
+        } else {
+            fields.split(',').map(|s| s.to_string()).collect()
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Validate)]
