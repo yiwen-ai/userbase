@@ -37,7 +37,7 @@ jobs:
       uses: docker/metadata-action@v4
       with:
         images: |
-          ${{ secrets.CR_REGISTRY }}/ywserver/userbase
+          ${{ secrets.CR_REGISTRY }}/ywbase/userbase
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
           type=semver,pattern={{raw}}
