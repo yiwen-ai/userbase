@@ -12,8 +12,8 @@ pub use structured_logger::unix_ms;
 
 pub struct ReqContext {
     pub rid: String,   // from x-request-id header
-    pub user: xid::Id, // from x-user-id header
-    pub rating: i8,    // from x-max-rating header, 0 if not present
+    pub user: xid::Id, // from x-auth-user header
+    pub rating: i8,    // from x-auth-user-rating header, 0 if not present
     pub unix_ms: u64,
     pub start: Instant,
     pub kv: RwLock<BTreeMap<String, Value>>,
@@ -48,8 +48,9 @@ pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
     let method = req.method().to_string();
     let uri = req.uri().to_string();
     let rid = extract_header(req.headers(), "x-request-id", || Uuid::new_v4().to_string());
-    let user = extract_header(req.headers(), "x-user-id", || "".to_string());
-    let rating = extract_header(req.headers(), "x-max-rating", || "0".to_string());
+    let user = extract_header(req.headers(), "x-auth-user", || "".to_string());
+    let app = extract_header(req.headers(), "x-auth-app", || "".to_string());
+    let rating = extract_header(req.headers(), "x-auth-user-rating", || "0".to_string());
     let rating = i8::from_str(&rating).unwrap_or(0);
 
     let uid = xid::Id::from_str(&user).unwrap_or_default();
@@ -72,6 +73,7 @@ pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
         uri = uri,
         rid = rid,
         user = user,
+        app = app,
         rating = rating,
         status = status,
         start = ctx.unix_ms,

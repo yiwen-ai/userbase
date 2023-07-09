@@ -1,9 +1,15 @@
 use axum::{
     extract::{Query, State},
-    headers::authorization::{Bearer, Credentials},
-    http::HeaderMap,
+    headers::{
+        authorization::{Bearer, Credentials},
+        HeaderValue,
+    },
+    http::{HeaderMap, StatusCode},
+    response::Response,
     Extension,
 };
+use cookie::Cookie;
+
 use serde::{Deserialize, Serialize};
 use std::{convert::From, str::FromStr, sync::Arc};
 use validator::Validate;
@@ -586,4 +592,125 @@ pub async fn verify_token(
         rating: user.rating,
         kind: user.kind,
     })))
+}
+
+pub async fn forward_auth(State(app): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let mut res_headers = HeaderMap::new();
+    let deault_value = HeaderValue::from_static("");
+
+    // add X-Real-Ip
+    if let Some(forwarded_for) = headers.get("x-forwarded-for") {
+        if let Ok(forwarded_for) = forwarded_for.to_str() {
+            let real_ip = forwarded_for.split(',').next().unwrap_or_default().trim();
+            if !real_ip.is_empty() {
+                res_headers.insert(
+                    "x-real-ip",
+                    real_ip.parse().unwrap_or_else(|_| deault_value.clone()),
+                );
+            }
+        }
+    }
+
+    // add X-Request-Id
+    let mut request_id = headers
+        .get("x-request-id")
+        .map(|v| v.to_str().unwrap_or_default().to_string())
+        .unwrap_or_default();
+    if request_id.is_empty() {
+        request_id = uuid::Uuid::new_v4().to_string();
+    }
+    res_headers.insert(
+        "x-request-id",
+        request_id.parse().unwrap_or_else(|_| deault_value.clone()),
+    );
+
+    let mut session = headers
+        .get("x-session")
+        .map_or_else(|| "", |v| v.to_str().unwrap_or_default())
+        .to_string();
+    let mut device_id = headers
+        .get("x-device-id")
+        .map_or_else(|| "", |v| v.to_str().unwrap_or_default())
+        .to_string();
+    if let Some(Ok(cookie_str)) = headers.get("Cookie").map(|v| v.to_str()) {
+        let sess_name = app.session_name_prefix.to_string() + "_SESS";
+        let sess_id = app.session_name_prefix.to_string() + "_DID";
+        for cookie in Cookie::split_parse_encoded(cookie_str) {
+            if let Ok(cookie) = cookie {
+                match cookie.name() {
+                    name if sess_name == name => {
+                        session = cookie.value().to_string();
+                    }
+                    name if sess_id == name => {
+                        device_id = cookie.value().to_string();
+                    }
+                    _ => {}
+                };
+            }
+        }
+    }
+
+    // add X-Device-Id
+    if !device_id.is_empty() {
+        res_headers.insert(
+            "x-device-id",
+            device_id.parse().unwrap_or_else(|_| deault_value.clone()),
+        );
+    }
+
+    // add:
+    // X-Auth-User
+    // X-Auth-User-Status
+    // X-Auth-User-Rating
+    // X-Auth-User-Kind
+    // X-Auth-App
+    // X-Auth-App-Scope
+    if !session.is_empty() {
+        if let Ok((sid, uid, _)) = app.session.from(&session) {
+            let mut doc = db::Session::with_pk(sid);
+            if doc
+                .get_one(&app.scylla, vec!["uid".to_string()])
+                .await
+                .is_ok() && doc.uid == uid {
+                res_headers.insert("x-auth-user", uid.to_string().parse().unwrap());
+
+                if let Some(token) = headers.get("authorization") {
+                    if let Some(token) = Bearer::decode(token) {
+                        if let Ok(token) = crypto::base64url_decode(token.token()) {
+                            if let Ok(token) = app.cwt.verify(&token) {
+                                if token.validate().is_ok() && token.sid == sid {
+                                    res_headers.insert(
+                                        "x-auth-user-status",
+                                        token.status.to_string().parse().unwrap(),
+                                    );
+                                    res_headers.insert(
+                                        "x-auth-user-rating",
+                                        token.rating.to_string().parse().unwrap(),
+                                    );
+                                    res_headers.insert(
+                                        "x-auth-user-kind",
+                                        token.kind.to_string().parse().unwrap(),
+                                    );
+
+                                    res_headers.insert(
+                                        "x-auth-app",
+                                        token.aud.to_string().parse().unwrap(),
+                                    );
+                                    res_headers.insert(
+                                        "x-auth-app-scope",
+                                        token.scope.parse().unwrap(),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut response = Response::default();
+    *response.status_mut() = StatusCode::NO_CONTENT;
+    *response.headers_mut() = res_headers;
+    response
 }

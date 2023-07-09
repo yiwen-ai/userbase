@@ -49,6 +49,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                     routing::get(api::session::min_verify_token),
                 )
                 .route("/verify_token", routing::get(api::session::verify_token))
+                .route("/forward_auth", routing::get(api::session::forward_auth))
                 .route("/list", routing::get(api::session::list)),
         )
         .nest(
@@ -184,6 +185,7 @@ async fn new_app_state(cfg: conf::Conf) -> anyhow::Result<api::AppState> {
 
     Ok(api::AppState {
         start_at: context::unix_ms(),
+        session_name_prefix: cfg.session_name_prefix,
         mac_id: Arc::new(mac_id),
         session: Arc::new(session),
         cwt: Arc::new(cwt),

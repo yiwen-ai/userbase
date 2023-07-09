@@ -107,7 +107,6 @@ impl UserOutput {
 
 pub async fn create(
     State(app): State<Arc<AppState>>,
-    Extension(_ctx): Extension<Arc<ReqContext>>,
     to: PackObject<CreateUserInput>,
 ) -> Result<PackObject<SuccessResponse<UserOutput>>, HTTPError> {
     let (to, input) = to.unpack();

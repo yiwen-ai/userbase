@@ -34,6 +34,7 @@ pub struct Keys {
 #[derive(Debug, Deserialize, Clone)]
 pub struct Conf {
     pub env: String,
+    pub session_name_prefix: String,
     pub log: Log,
     pub server: Server,
     pub scylla: ScyllaDB,

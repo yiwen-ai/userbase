@@ -21,6 +21,7 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Clone)]
 pub struct AppState {
     pub start_at: u64,
+    pub session_name_prefix: String,
     pub mac_id: Arc<crypto::MacId>,
     pub session: Arc<crypto::Session>,
     pub cwt: Arc<crypto::Cwt>,

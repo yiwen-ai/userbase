@@ -1,4 +1,5 @@
-env = "test" # "test", "dev", "prod"
+env = "test"               # "test", "dev", "prod"
+session_name_prefix = "YW"
 
 [log]
 # Log level: "trace", "debug", "info", "warn", "error"
