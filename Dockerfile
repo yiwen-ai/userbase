@@ -37,17 +37,10 @@ RUN case "$BUILDPLATFORM" in \
 ARG TARGETPLATFORM
 ENV TARGETPLATFORM=${TARGETPLATFORM:-linux/amd64}
 
-
-# Enable crate features
-ARG FEATURES
-
 COPY --from=planner /src/recipe.json recipe.json
-RUN xx-cargo chef cook --profile release ${FEATURES:+--features} $FEATURES --recipe-path recipe.json
+RUN xx-cargo chef cook --release --recipe-path recipe.json
 
-COPY config ./config
-COPY crates ./crates
-COPY src ./src
-COPY Cargo.toml Cargo.lock ./
+COPY . .
 RUN xx-cargo build --release
 
 FROM debian:12-slim AS runtime
