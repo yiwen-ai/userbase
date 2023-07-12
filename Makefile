@@ -17,6 +17,3 @@ lint:
 
 fix:
 	@cargo clippy --fix --workspace --tests
-
-docker:
-	@docker build --rm -t yw-cr-registry.cn-shanghai.cr.aliyuncs.com/ywbase/userbase:latest -f ./Dockerfile.arm64 .

@@ -632,7 +632,7 @@ pub async fn forward_auth(State(app): State<Arc<AppState>>, headers: HeaderMap) 
         .get("x-device-id")
         .map_or_else(|| "", |v| v.to_str().unwrap_or_default())
         .to_string();
-    if let Some(Ok(cookie_str)) = headers.get("Cookie").map(|v| v.to_str()) {
+    if let Some(Ok(cookie_str)) = headers.get("cookie").map(|v| v.to_str()) {
         let sess_name = app.session_name_prefix.to_string() + "_SESS";
         let sess_id = app.session_name_prefix.to_string() + "_DID";
         for cookie in Cookie::split_parse_encoded(cookie_str) {
@@ -671,7 +671,9 @@ pub async fn forward_auth(State(app): State<Arc<AppState>>, headers: HeaderMap) 
             if doc
                 .get_one(&app.scylla, vec!["uid".to_string()])
                 .await
-                .is_ok() && doc.uid == uid {
+                .is_ok()
+                && doc.uid == uid
+            {
                 res_headers.insert("x-auth-user", uid.to_string().parse().unwrap());
 
                 if let Some(token) = headers.get("authorization") {
@@ -696,10 +698,8 @@ pub async fn forward_auth(State(app): State<Arc<AppState>>, headers: HeaderMap) 
                                         "x-auth-app",
                                         token.aud.to_string().parse().unwrap(),
                                     );
-                                    res_headers.insert(
-                                        "x-auth-app-scope",
-                                        token.scope.parse().unwrap(),
-                                    );
+                                    res_headers
+                                        .insert("x-auth-app-scope", token.scope.parse().unwrap());
                                 }
                             }
                         }

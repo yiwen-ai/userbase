@@ -1,4 +1,3 @@
-// use hex_literal::hex;
 use hmac::{Hmac, Mac};
 use sha3::Sha3_256;
 use subtle::ConstantTimeEq;
