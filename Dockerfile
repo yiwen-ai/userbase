@@ -19,7 +19,7 @@ FROM chef as builder
 WORKDIR /src
 
 COPY --from=xx / /
-RUN apt-get update && apt-get install -y clang lld
+RUN apt-get update && apt-get install -y clang lld cmake
 
 # `ARG`/`ENV` pair is a workaround for `docker build` backward-compatibility.
 #
@@ -37,6 +37,8 @@ RUN case "$BUILDPLATFORM" in \
 # https://github.com/docker/buildx/issues/510
 ARG TARGETPLATFORM
 ENV TARGETPLATFORM=${TARGETPLATFORM:-linux/amd64}
+
+RUN xx-apt-get install -y gcc g++ libc6-dev
 
 COPY --from=planner /src/recipe.json recipe.json
 RUN xx-cargo chef cook --release --recipe-path recipe.json
