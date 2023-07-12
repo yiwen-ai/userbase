@@ -42,7 +42,7 @@ ENV TARGETPLATFORM=${TARGETPLATFORM:-linux/amd64}
 ARG FEATURES
 
 COPY --from=planner /src/recipe.json recipe.json
-RUN xx-cargo chef cook --profile $PROFILE ${FEATURES:+--features} $FEATURES --recipe-path recipe.json
+RUN xx-cargo chef cook --profile release ${FEATURES:+--features} $FEATURES --recipe-path recipe.json
 
 COPY config ./config
 COPY crates ./crates
