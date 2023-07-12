@@ -19,6 +19,7 @@ FROM chef as builder
 WORKDIR /src
 
 COPY --from=xx / /
+RUN apt-get update && apt-get install -y clang lld
 
 # `ARG`/`ENV` pair is a workaround for `docker build` backward-compatibility.
 #
@@ -41,7 +42,8 @@ COPY --from=planner /src/recipe.json recipe.json
 RUN xx-cargo chef cook --release --recipe-path recipe.json
 
 COPY . .
-RUN xx-cargo build --release
+RUN xx-cargo build --release --bin ywapp \
+    && mv target/$(xx-cargo --print-target-triple)/release/rustapp /src/rustapp
 
 FROM debian:12-slim AS runtime
 
@@ -52,5 +54,5 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY --from=builder /src/config ./config
-COPY --from=builder /src/target/release/userbase ./
-ENTRYPOINT ["./userbase"]
+COPY --from=builder /src/rustapp ./rustapp
+ENTRYPOINT ["./rustapp"]
