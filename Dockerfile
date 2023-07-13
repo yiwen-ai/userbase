@@ -44,8 +44,8 @@ COPY --from=planner /src/recipe.json recipe.json
 RUN xx-cargo chef cook --release --recipe-path recipe.json
 
 COPY . .
-RUN xx-cargo build --release --bin rustapp \
-    && mv target/$(xx-cargo --print-target-triple)/release/rustapp /src/rustapp
+RUN xx-cargo build --release \
+    && mv target/$(xx-cargo --print-target-triple)/release /src/release
 
 FROM debian:12-slim AS runtime
 
@@ -56,5 +56,5 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY --from=builder /src/config ./config
-COPY --from=builder /src/rustapp ./rustapp
-ENTRYPOINT ["./rustapp"]
+COPY --from=builder /src/release/userbase ./
+ENTRYPOINT ["./userbase"]
