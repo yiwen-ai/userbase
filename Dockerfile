@@ -44,7 +44,7 @@ COPY --from=planner /src/recipe.json recipe.json
 RUN xx-cargo chef cook --release --recipe-path recipe.json
 
 COPY . .
-RUN xx-cargo build --release --bin ywapp \
+RUN xx-cargo build --release --bin rustapp \
     && mv target/$(xx-cargo --print-target-triple)/release/rustapp /src/rustapp
 
 FROM debian:12-slim AS runtime
