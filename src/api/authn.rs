@@ -11,7 +11,7 @@ use axum_web::erring::{HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
-use crate::api::{self, AppState};
+use crate::api::{self, get_fields, AppState};
 
 use crate::db;
 
@@ -227,17 +227,6 @@ pub struct AuthNPKInput {
     pub fields: Option<String>,
 }
 
-impl AuthNPKInput {
-    pub fn get_fields(&self) -> Vec<String> {
-        let fields = self.fields.clone().unwrap_or_default();
-        if fields.is_empty() {
-            vec![]
-        } else {
-            fields.split(',').map(|s| s.to_string()).collect()
-        }
-    }
-}
-
 pub async fn delete(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
@@ -278,6 +267,7 @@ pub async fn get(
     .await;
 
     let mut doc = db::AuthN::with_pk(input.idp.clone(), input.aud.clone(), input.sub.clone());
-    doc.get_one(&app.scylla, input.get_fields()).await?;
+    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
+        .await?;
     Ok(to.with(SuccessResponse::new(AuthNOutput::from(doc, &to))))
 }

@@ -15,8 +15,8 @@ use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
 use crate::api::{
-    member::MemberOutput, user::UserOutput, AppState, Pagination, QueryIdCn,
-    UpdateSpecialFieldInput,
+    get_fields, member::MemberOutput, token_from_xid, token_to_xid, user::UserOutput, AppState,
+    Pagination, QueryIdCn, UpdateSpecialFieldInput,
 };
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -164,7 +164,8 @@ pub async fn get(
     .await;
 
     let mut doc = db::Group::with_pk(id);
-    doc.get_one(&app.scylla, input.get_fields()).await?;
+    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
+        .await?;
     Ok(to.with(SuccessResponse::new(GroupOutput::from(doc, &to))))
 }
 
@@ -345,26 +346,23 @@ pub async fn list_users(
     let (to, input) = to.unpack();
     input.validate()?;
 
-    if input.gid.is_none() {
-        return Err(HTTPError::new(400, "gid is required".into()));
-    }
-    let gid = *input.gid.unwrap();
+    let gid = input.gid.unwrap();
     let page_size = input.page_size.unwrap_or(10);
     ctx.set_kvs(vec![("action", "list_users".into())]).await;
 
     let fields = input.fields.unwrap_or_default();
-    let page_token = input.page_token.map(|s| s.unwrap());
     let res = db::User::list_group_users(
         &app.scylla,
         gid,
         fields,
         page_size,
-        page_token,
+        token_to_xid(&input.page_token),
         input.status,
     )
     .await?;
     let next_page_token = if res.len() >= page_size as usize {
-        Some(res.last().unwrap().id.to_string())
+        let v = res.last().unwrap();
+        to.with_option(token_from_xid(v.id))
     } else {
         None
     };
@@ -387,26 +385,23 @@ pub async fn list_members(
     let (to, input) = to.unpack();
     input.validate()?;
 
-    if input.gid.is_none() {
-        return Err(HTTPError::new(400, "gid is required".into()));
-    }
-    let gid = *input.gid.unwrap();
+    let gid = input.gid.unwrap();
     let page_size = input.page_size.unwrap_or(10);
     ctx.set_kvs(vec![("action", "list_users".into())]).await;
 
     let fields = input.fields.unwrap_or_default();
-    let page_token = input.page_token.map(|s| s.unwrap());
     let res = db::Member::list_members(
         &app.scylla,
         gid,
         fields,
         page_size,
-        page_token,
+        token_to_xid(&input.page_token),
         input.status,
     )
     .await?;
     let next_page_token = if res.len() >= page_size as usize {
-        Some(res.last().unwrap().uid.to_string())
+        let v = res.last().unwrap();
+        to.with_option(token_from_xid(v.uid))
     } else {
         None
     };

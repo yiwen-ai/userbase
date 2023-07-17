@@ -18,7 +18,7 @@ use axum_web::context::{unix_ms, ReqContext};
 use axum_web::erring::{HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
 
-use crate::api::{AppState, QuerySid};
+use crate::api::{get_fields, AppState, QuerySid};
 use crate::crypto;
 use crate::db;
 
@@ -442,7 +442,8 @@ pub async fn get(
     .await;
 
     let mut doc = db::Session::with_pk(sid);
-    doc.get_one(&app.scylla, input.get_fields()).await?;
+    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
+        .await?;
     Ok(to.with(SuccessResponse::new(SessionOutput::from(doc, &to))))
 }
 
@@ -635,18 +636,16 @@ pub async fn forward_auth(State(app): State<Arc<AppState>>, headers: HeaderMap) 
     if let Some(Ok(cookie_str)) = headers.get("cookie").map(|v| v.to_str()) {
         let sess_name = app.session_name_prefix.to_string() + "_SESS";
         let sess_id = app.session_name_prefix.to_string() + "_DID";
-        for cookie in Cookie::split_parse_encoded(cookie_str) {
-            if let Ok(cookie) = cookie {
-                match cookie.name() {
-                    name if sess_name == name => {
-                        session = cookie.value().to_string();
-                    }
-                    name if sess_id == name => {
-                        device_id = cookie.value().to_string();
-                    }
-                    _ => {}
-                };
-            }
+        for cookie in Cookie::split_parse_encoded(cookie_str).flatten() {
+            match cookie.name() {
+                name if sess_name == name => {
+                    session = cookie.value().to_string();
+                }
+                name if sess_id == name => {
+                    device_id = cookie.value().to_string();
+                }
+                _ => {}
+            };
         }
     }
 

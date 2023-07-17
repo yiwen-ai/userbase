@@ -16,7 +16,10 @@ use axum_web::erring::{HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
-use crate::api::{group::GroupOutput, AppState, Pagination, QueryIdCn, UpdateSpecialFieldInput};
+use crate::api::{
+    get_fields, group::GroupOutput, token_from_xid, token_to_xid, AppState, Pagination, QueryIdCn,
+    UpdateSpecialFieldInput,
+};
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CreateUserInput {
@@ -216,7 +219,8 @@ pub async fn get(
     .await;
 
     let mut doc = db::User::with_pk(id);
-    doc.get_one(&app.scylla, input.get_fields()).await?;
+    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
+        .await?;
     Ok(to.with(SuccessResponse::new(UserOutput::from(doc, &to))))
 }
 
@@ -459,18 +463,19 @@ pub async fn list_groups(
     ctx.set_kvs(vec![("action", "list_users".into())]).await;
 
     let fields = input.fields.unwrap_or_default();
-    let page_token = input.page_token.map(|s| s.unwrap());
     let res = db::Member::list_groups(
         &app.scylla,
         ctx.user,
         fields,
         page_size,
-        page_token,
+        token_to_xid(&input.page_token),
         input.status,
     )
     .await?;
+
     let next_page_token = if res.len() >= page_size as usize {
-        Some(res.last().unwrap().id.to_string())
+        let v = res.last().unwrap();
+        to.with_option(token_from_xid(v.id))
     } else {
         None
     };

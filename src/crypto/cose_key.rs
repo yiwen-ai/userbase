@@ -1,5 +1,3 @@
-
-
 use ciborium::Value;
 use coset::{iana, CborSerializable, CoseKey, CoseKeyBuilder, KeyType, Label};
 use ed25519_dalek::SigningKey;
@@ -138,7 +136,6 @@ impl Key {
 
 #[cfg(test)]
 mod tests {
-    
 
     #[test]
     fn aes_session_works() {

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use validator::Validate;
 
-use axum_web::object::PackObject;
+use axum_web::object::{cbor_from_slice, cbor_to_vec, PackObject};
 
 use crate::crypto;
 use crate::db;
@@ -77,17 +77,6 @@ pub struct QueryIdCn {
     pub fields: Option<String>,
 }
 
-impl QueryIdCn {
-    pub fn get_fields(&self) -> Vec<String> {
-        let fields = self.fields.clone().unwrap_or_default();
-        if fields.is_empty() {
-            vec![]
-        } else {
-            fields.split(',').map(|s| s.to_string()).collect()
-        }
-    }
-}
-
 #[derive(Debug, Deserialize, Validate)]
 pub struct QueryGidUid {
     pub gid: PackObject<xid::Id>,
@@ -101,26 +90,28 @@ pub struct QuerySid {
     pub fields: Option<String>,
 }
 
-impl QuerySid {
-    pub fn get_fields(&self) -> Vec<String> {
-        let fields = self.fields.clone().unwrap_or_default();
-        if fields.is_empty() {
-            vec![]
-        } else {
-            fields.split(',').map(|s| s.to_string()).collect()
-        }
-    }
-}
-
 #[derive(Debug, Deserialize, Validate)]
 pub struct Pagination {
-    pub gid: Option<PackObject<xid::Id>>,
-    pub page_token: Option<PackObject<xid::Id>>,
+    pub gid: PackObject<xid::Id>,
+    pub page_token: Option<PackObject<Vec<u8>>>,
     #[validate(range(min = 2, max = 1000))]
     pub page_size: Option<u16>,
     #[validate(range(min = -1, max = 2))]
     pub status: Option<i8>,
     pub fields: Option<Vec<String>>,
+}
+
+pub fn token_to_xid(page_token: &Option<PackObject<Vec<u8>>>) -> Option<xid::Id> {
+    match page_token.as_ref().map(|v| v.unwrap_ref()) {
+        Some(v) => cbor_from_slice::<PackObject<xid::Id>>(v)
+            .ok()
+            .map(|v| v.unwrap()),
+        _ => None,
+    }
+}
+
+pub fn token_from_xid(id: xid::Id) -> Option<Vec<u8>> {
+    cbor_to_vec(&PackObject::Cbor(id)).ok()
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -137,4 +128,16 @@ pub struct UpdateSpecialFieldInput {
     #[validate(phone)]
     pub phone: Option<String>,
     pub updated_at: i64,
+}
+
+pub fn get_fields(fields: Option<String>) -> Vec<String> {
+    if fields.is_none() {
+        return vec![];
+    }
+    let fields = fields.unwrap();
+    let fields = fields.trim();
+    if fields.is_empty() {
+        return vec![];
+    }
+    fields.split(',').map(|s| s.trim().to_string()).collect()
 }
