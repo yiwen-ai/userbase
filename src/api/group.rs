@@ -16,7 +16,7 @@ use scylla_orm::ColumnsMap;
 
 use crate::api::{
     get_fields, member::MemberOutput, token_from_xid, token_to_xid, user::UserOutput, AppState,
-    Pagination, QueryIdCn, UpdateSpecialFieldInput,
+    BatchIdsInput, Pagination, QueryIdCn, UpdateSpecialFieldInput,
 };
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -414,4 +414,57 @@ pub async fn list_members(
             .map(|r| MemberOutput::from(r.to_owned(), &to))
             .collect(),
     }))
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct GroupInfo {
+    pub id: PackObject<xid::Id>,
+    pub cn: String,
+    pub status: i8,
+    pub kind: i8,
+    pub name: String,
+    pub logo: String,
+}
+
+pub async fn batch_get_info(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<BatchIdsInput>,
+) -> Result<PackObject<SuccessResponse<Vec<GroupInfo>>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+
+    ctx.set_kvs(vec![
+        ("action", "batch_get_info".into()),
+        ("ids", input.ids.len().into()),
+    ])
+    .await;
+
+    let res = db::Group::batch_get(
+        &app.scylla,
+        input.ids,
+        vec![
+            "id".to_string(),
+            "cn".to_string(),
+            "status".to_string(),
+            "kind".to_string(),
+            "name".to_string(),
+            "logo".to_string(),
+        ],
+    )
+    .await?;
+
+    let output: Vec<GroupInfo> = res
+        .into_iter()
+        .map(|doc| GroupInfo {
+            id: to.with(doc.id),
+            cn: doc.cn,
+            status: doc.status,
+            kind: doc.kind,
+            name: doc.name,
+            logo: doc.logo,
+        })
+        .collect();
+
+    Ok(to.with(SuccessResponse::new(output)))
 }

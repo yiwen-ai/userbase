@@ -5,8 +5,8 @@ use axum::{
 use chrono::{Datelike, NaiveDate, NaiveDateTime};
 use isolang::Language;
 use serde::{Deserialize, Serialize};
-use std::ops::Add;
 use std::{convert::From, sync::Arc};
+use std::{ops::Add};
 use validator::Validate;
 
 use crate::db;
@@ -17,8 +17,8 @@ use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
 use crate::api::{
-    get_fields, group::GroupOutput, token_from_xid, token_to_xid, AppState, Pagination, QueryIdCn,
-    UpdateSpecialFieldInput,
+    get_fields, group::GroupOutput, token_from_xid, token_to_xid, AppState, BatchIdsInput,
+    Pagination, QueryGid, QueryIdCn, UpdateSpecialFieldInput,
 };
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -488,4 +488,92 @@ pub async fn list_groups(
             .map(|r| GroupOutput::from(r.to_owned(), &to))
             .collect(),
     }))
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct UserInfo {
+    pub id: PackObject<xid::Id>,
+    pub cn: String,
+    pub status: i8,
+    pub kind: i8,
+    pub name: String,
+    pub picture: String,
+}
+
+pub async fn batch_get_info(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<BatchIdsInput>,
+) -> Result<PackObject<SuccessResponse<Vec<UserInfo>>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+
+    ctx.set_kvs(vec![
+        ("action", "batch_get_info".into()),
+        ("ids", input.ids.len().into()),
+    ])
+    .await;
+
+    let res = db::User::batch_get(
+        &app.scylla,
+        input.ids,
+        vec![
+            "id".to_string(),
+            "cn".to_string(),
+            "status".to_string(),
+            "kind".to_string(),
+            "name".to_string(),
+            "picture".to_string(),
+        ],
+    )
+    .await?;
+
+    let output: Vec<UserInfo> = res
+        .into_iter()
+        .map(|doc| UserInfo {
+            id: to.with(doc.id),
+            cn: doc.cn,
+            status: doc.status,
+            kind: doc.kind,
+            name: doc.name,
+            picture: doc.picture,
+        })
+        .collect();
+
+    Ok(to.with(SuccessResponse::new(output)))
+}
+
+pub async fn get_group(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<QueryGid>,
+) -> Result<PackObject<SuccessResponse<GroupOutput>>, HTTPError> {
+    input.validate()?;
+
+    let gid = *input.gid.to_owned();
+    ctx.set_kvs(vec![
+        ("action", "get_group".into()),
+        ("gid", gid.to_string().into()),
+    ])
+    .await;
+
+    let role = if gid == ctx.user {
+        2i8
+    } else {
+        let mut member = db::Member::with_pk(gid, ctx.user);
+        let res = member.get_one(&app.scylla, vec!["role".to_string()]).await;
+        if res.is_err() || member.role < -1 {
+            return Err(HTTPError::new(403, "not a group member".to_string()));
+        }
+
+        member.role
+    };
+
+    let mut doc = db::Group::with_pk(gid);
+    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
+        .await?;
+    doc._role = role;
+    doc._fields.push("_role".to_string());
+    Ok(to.with(SuccessResponse::new(GroupOutput::from(doc, &to))))
 }

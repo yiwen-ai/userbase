@@ -91,6 +91,12 @@ pub struct QuerySid {
 }
 
 #[derive(Debug, Deserialize, Validate)]
+pub struct QueryGid {
+    pub gid: PackObject<xid::Id>,
+    pub fields: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
 pub struct Pagination {
     pub gid: PackObject<xid::Id>,
     pub page_token: Option<PackObject<Vec<u8>>>,
@@ -140,4 +146,10 @@ pub fn get_fields(fields: Option<String>) -> Vec<String> {
         return vec![];
     }
     fields.split(',').map(|s| s.trim().to_string()).collect()
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct BatchIdsInput {
+    #[validate(length(min = 1, max = 1000))]
+    pub ids: Vec<PackObject<xid::Id>>,
 }

@@ -428,17 +428,15 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
-    async fn test_all() -> anyhow::Result<()> {
+    async fn test_all() {
         // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
-        member_model_works().await?;
-        list_members_works().await?;
-        list_groups_works().await?;
-
-        Ok(())
+        member_model_works().await;
+        list_members_works().await;
+        list_groups_works().await;
     }
 
     // #[tokio::test(flavor = "current_thread")]
-    async fn member_model_works() -> anyhow::Result<()> {
+    async fn member_model_works() {
         let db = get_db().await;
         let uid = xid::new();
         let gid = xid::new();
@@ -453,7 +451,7 @@ mod tests {
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 404);
 
-            assert!(doc.save(db).await?);
+            assert!(doc.save(db).await.unwrap());
 
             let res = doc.save(db).await;
             assert!(res.is_err());
@@ -461,13 +459,13 @@ mod tests {
             assert_eq!(err.code, 409);
 
             let mut doc2 = Member::with_pk(gid, uid);
-            doc2.get_one(db, vec![]).await?;
+            doc2.get_one(db, vec![]).await.unwrap();
             // println!("doc: {:#?}", doc2);
 
             assert_eq!(doc2.role, doc.role);
 
             let mut doc3 = Member::with_pk(gid, uid);
-            doc3.get_one(db, vec!["role".to_string()]).await?;
+            doc3.get_one(db, vec!["role".to_string()]).await.unwrap();
             assert_eq!(doc3.role, 2i8);
             assert_eq!(doc3._fields, vec!["role"]);
         }
@@ -475,7 +473,7 @@ mod tests {
         // update role
         {
             let mut doc = Member::with_pk(gid, uid);
-            doc.get_one(db, vec![]).await?;
+            doc.get_one(db, vec![]).await.unwrap();
 
             let res = doc.update_role(db, 2, doc.updated_at - 1).await;
             assert!(res.is_err());
@@ -485,20 +483,20 @@ mod tests {
             let res = doc.update_role(db, -3, doc.updated_at).await;
             assert!(res.is_err());
 
-            let res = doc.update_role(db, 2, doc.updated_at).await?;
+            let res = doc.update_role(db, 2, doc.updated_at).await.unwrap();
             assert!(!res);
 
-            let res = doc.update_role(db, 1, doc.updated_at).await?;
+            let res = doc.update_role(db, 1, doc.updated_at).await.unwrap();
             assert!(res);
 
-            let res = doc.update_role(db, 1, doc.updated_at).await?;
+            let res = doc.update_role(db, 1, doc.updated_at).await.unwrap();
             assert!(!res);
         }
 
         // update priority
         {
             let mut doc = Member::with_pk(gid, uid);
-            doc.get_one(db, vec![]).await?;
+            doc.get_one(db, vec![]).await.unwrap();
 
             let res = doc.update_priority(db, -2, doc.updated_at).await;
             assert!(res.is_err());
@@ -508,27 +506,27 @@ mod tests {
             let res = doc.update_priority(db, 2, doc.updated_at - 1).await;
             assert!(res.is_err());
 
-            let res = doc.update_priority(db, 2, doc.updated_at).await?;
+            let res = doc.update_priority(db, 2, doc.updated_at).await.unwrap();
             assert!(res);
 
-            let res = doc.update_priority(db, 1, doc.updated_at).await?;
+            let res = doc.update_priority(db, 1, doc.updated_at).await.unwrap();
             assert!(res);
 
-            let res = doc.update_priority(db, 1, doc.updated_at).await?;
+            let res = doc.update_priority(db, 1, doc.updated_at).await.unwrap();
             assert!(!res);
         }
 
         // delete
         {
             let mut doc = Member::with_pk(gid, uid);
-            doc.get_one(db, vec![]).await?;
+            doc.get_one(db, vec![]).await.unwrap();
 
             let res = doc.delete(db, doc.updated_at).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409);
 
-            let res = doc.update_role(db, -2, doc.updated_at).await?;
+            let res = doc.update_role(db, -2, doc.updated_at).await.unwrap();
             assert!(res);
 
             let res = doc.delete(db, doc.updated_at - 1).await;
@@ -536,60 +534,68 @@ mod tests {
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409);
 
-            let res = doc.delete(db, doc.updated_at).await?;
+            let res = doc.delete(db, doc.updated_at).await.unwrap();
             assert!(res);
 
-            let res = doc.delete(db, doc.updated_at).await?;
+            let res = doc.delete(db, doc.updated_at).await.unwrap();
             assert!(!res);
         }
-
-        Ok(())
     }
 
     // #[tokio::test(flavor = "current_thread")]
-    async fn list_members_works() -> anyhow::Result<()> {
+    async fn list_members_works() {
         let db = get_db().await;
         let gid = xid::new();
 
         let mut docs: Vec<Member> = Vec::new();
         for _i in 0..10 {
             let mut doc = Member::with_pk(gid, xid::new());
-            doc.save(db).await?;
+            doc.save(db).await.unwrap();
             docs.push(doc)
         }
         assert_eq!(docs.len(), 10);
 
-        let first = Member::list_members(db, gid, Vec::new(), 1, None, None).await?;
+        let first = Member::list_members(db, gid, Vec::new(), 1, None, None)
+            .await
+            .unwrap();
         assert_eq!(first.len(), 1);
 
         let mut first = first[0].to_owned();
         assert_eq!(first.gid, docs.first().unwrap().gid);
         assert_eq!(first.uid, docs.first().unwrap().uid);
 
-        first.update_role(db, 1, first.updated_at).await?;
-        let res = Member::list_members(db, gid, vec![], 100, None, None).await?;
+        first.update_role(db, 1, first.updated_at).await.unwrap();
+        let res = Member::list_members(db, gid, vec![], 100, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 10);
 
-        let res = Member::list_members(db, gid, vec![], 100, None, Some(1)).await?;
+        let res = Member::list_members(db, gid, vec![], 100, None, Some(1))
+            .await
+            .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].uid, docs.first().unwrap().uid);
 
-        let res = Member::list_members(db, gid, vec![], 5, None, None).await?;
+        let res = Member::list_members(db, gid, vec![], 5, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 5);
         assert_eq!(res[4].uid, docs[4].uid);
 
-        let res = Member::list_members(db, gid, vec![], 5, Some(docs[4].uid), None).await?;
+        let res = Member::list_members(db, gid, vec![], 5, Some(docs[4].uid), None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 5);
         assert_eq!(res[4].uid, docs[9].uid);
 
-        let res = Member::list_members(db, gid, vec![], 5, Some(docs[4].uid), Some(1)).await?;
+        let res = Member::list_members(db, gid, vec![], 5, Some(docs[4].uid), Some(1))
+            .await
+            .unwrap();
         assert_eq!(res.len(), 0);
-
-        Ok(())
     }
 
     // #[tokio::test(flavor = "current_thread")]
-    async fn list_groups_works() -> anyhow::Result<()> {
+    async fn list_groups_works() {
         let db = get_db().await;
         let uid = xid::new();
 
@@ -598,41 +604,54 @@ mod tests {
             let mut group = Group::with_pk(xid::new());
             group.uid = xid::new();
             group.name = format!("Group {}", i);
-            group.save(db).await?;
+            group.save(db).await.unwrap();
 
             let mut doc = Member::with_pk(group.id, uid);
-            doc.save(db).await?;
+            doc.save(db).await.unwrap();
             docs.push(doc)
         }
 
         assert_eq!(docs.len(), 10);
 
-        let latest = Member::list_groups(db, uid, Vec::new(), 1, None, None).await?;
+        let latest = Member::list_groups(db, uid, Vec::new(), 1, None, None)
+            .await
+            .unwrap();
         assert_eq!(latest.len(), 1);
 
         let latest = latest[0].to_owned();
         assert_eq!(latest.id, docs.last().unwrap().gid);
 
         let mut latest = docs[9].to_owned();
-        latest.update_priority(db, 1, latest.updated_at).await?;
-        let res = Member::list_groups(db, uid, vec![], 100, None, None).await?;
+        latest
+            .update_priority(db, 1, latest.updated_at)
+            .await
+            .unwrap();
+        let res = Member::list_groups(db, uid, vec![], 100, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 10);
 
-        let res = Member::list_groups(db, uid, vec![], 100, None, Some(1)).await?;
+        let res = Member::list_groups(db, uid, vec![], 100, None, Some(1))
+            .await
+            .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].id, docs.last().unwrap().gid);
 
-        let res = Member::list_groups(db, uid, vec![], 5, None, None).await?;
+        let res = Member::list_groups(db, uid, vec![], 5, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 5);
         assert_eq!(res[4].id, docs[5].gid);
 
-        let res = Member::list_groups(db, uid, vec![], 5, Some(docs[5].gid), None).await?;
+        let res = Member::list_groups(db, uid, vec![], 5, Some(docs[5].gid), None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 5);
         assert_eq!(res[4].id, docs[0].gid);
 
-        let res = Member::list_groups(db, uid, vec![], 5, Some(docs[5].gid), Some(1)).await?;
+        let res = Member::list_groups(db, uid, vec![], 5, Some(docs[5].gid), Some(1))
+            .await
+            .unwrap();
         assert_eq!(res.len(), 0);
-
-        Ok(())
     }
 }

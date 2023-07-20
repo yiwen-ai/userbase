@@ -201,10 +201,9 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn exec_cqls_works() -> anyhow::Result<()> {
+    async fn exec_cqls_works() {
         let db = get_db().await;
-        db.init_tables_for_test().await?;
-        db.init_data().await?;
-        Ok(())
+        db.init_tables_for_test().await.unwrap();
+        db.init_data().await.unwrap();
     }
 }

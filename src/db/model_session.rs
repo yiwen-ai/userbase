@@ -296,16 +296,14 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
-    async fn test_all() -> anyhow::Result<()> {
+    async fn test_all() {
         // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
-        session_model_works().await?;
-        list_by_uid_works().await?;
-
-        Ok(())
+        session_model_works().await;
+        list_by_uid_works().await;
     }
 
     // #[tokio::test(flavor = "current_thread")]
-    async fn session_model_works() -> anyhow::Result<()> {
+    async fn session_model_works() {
         let db = get_db().await;
         let uid = xid::new();
         let sid = xid::new();
@@ -320,7 +318,7 @@ mod tests {
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 404);
 
-            assert!(doc.save(db, 1).await?);
+            assert!(doc.save(db, 1).await.unwrap());
 
             let res = doc.save(db, 1).await;
             assert!(res.is_err());
@@ -328,11 +326,11 @@ mod tests {
             assert_eq!(err.code, 409);
 
             let mut doc2 = Session::with_pk(sid);
-            doc2.get_one(db, vec![]).await?;
+            doc2.get_one(db, vec![]).await.unwrap();
             assert_eq!(doc2.uid, doc.uid);
 
             let mut doc3 = Session::with_pk(sid);
-            doc3.get_one(db, vec!["ttl".to_string()]).await?;
+            doc3.get_one(db, vec!["ttl".to_string()]).await.unwrap();
 
             assert_eq!(doc3.ttl, 1i32);
             assert_eq!(doc3._fields, vec!["ttl"]);
@@ -356,18 +354,18 @@ mod tests {
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 404);
 
-            assert!(doc.save(db, 3).await?);
+            assert!(doc.save(db, 3).await.unwrap());
             time::sleep(time::Duration::from_millis(1500)).await;
 
             let mut doc2 = Session::with_pk(sid);
-            assert!(doc2.renew(db).await?);
+            assert!(doc2.renew(db).await.unwrap());
             assert_eq!(doc2.ttl, 3);
             assert_eq!(doc2.uid, uid);
             assert!(doc2.created_at > doc.created_at);
 
             time::sleep(time::Duration::from_millis(2000)).await;
             let mut doc3 = Session::with_pk(sid);
-            doc3.get_one(db, vec!["ttl".to_string()]).await?;
+            doc3.get_one(db, vec!["ttl".to_string()]).await.unwrap();
 
             time::sleep(time::Duration::from_millis(1100)).await;
             let mut doc3 = Session::with_pk(sid);
@@ -380,29 +378,27 @@ mod tests {
         // delete
         {
             let mut doc = Session::with_pk(sid);
-            let res = doc.delete(db, xid::new()).await?;
+            let res = doc.delete(db, xid::new()).await.unwrap();
             assert!(!res);
 
             doc.uid = uid;
-            assert!(doc.save(db, 99).await?);
+            assert!(doc.save(db, 99).await.unwrap());
 
             let res = doc.delete(db, xid::new()).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409);
 
-            let res = doc.delete(db, doc.uid).await?;
+            let res = doc.delete(db, doc.uid).await.unwrap();
             assert!(res);
 
-            let res = doc.delete(db, doc.uid).await?;
+            let res = doc.delete(db, doc.uid).await.unwrap();
             assert!(!res);
         }
-
-        Ok(())
     }
 
     // #[tokio::test(flavor = "current_thread")]
-    async fn list_by_uid_works() -> anyhow::Result<()> {
+    async fn list_by_uid_works() {
         let db = get_db().await;
         let uid = xid::new();
 
@@ -410,16 +406,15 @@ mod tests {
         for _i in 0..10 {
             let mut doc = Session::with_pk(xid::new());
             doc.uid = uid;
-            doc.save(db, 99).await?;
+            doc.save(db, 99).await.unwrap();
             docs.push(doc)
         }
 
         assert_eq!(docs.len(), 10);
 
-        let res = Session::list_by_uid(db, uid, Vec::new()).await?;
+        let res = Session::list_by_uid(db, uid, Vec::new()).await.unwrap();
         assert_eq!(res.len(), 10);
         assert_eq!(res[0].id, docs[0].id);
         assert_eq!(res[9].id, docs[9].id);
-        Ok(())
     }
 }

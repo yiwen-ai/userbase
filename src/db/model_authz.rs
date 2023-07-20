@@ -257,7 +257,6 @@ impl AuthZ {
 mod tests {
     use axum_web::erring;
 
-    
     use tokio::{sync::OnceCell, time};
 
     use super::*;
@@ -277,16 +276,14 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
-    async fn test_all() -> anyhow::Result<()> {
+    async fn test_all() {
         // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
-        authz_model_works().await?;
-        list_by_uid_works().await?;
-
-        Ok(())
+        authz_model_works().await;
+        list_by_uid_works().await;
     }
 
     // #[tokio::test(flavor = "current_thread")]
-    async fn authz_model_works() -> anyhow::Result<()> {
+    async fn authz_model_works() {
         let db = get_db().await;
         let uid = xid::new();
         let aud = xid::new();
@@ -303,7 +300,7 @@ mod tests {
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 404);
 
-            assert!(doc.save(db).await?);
+            assert!(doc.save(db).await.unwrap());
 
             let res = doc.save(db).await;
             assert!(res.is_err());
@@ -311,11 +308,11 @@ mod tests {
             assert_eq!(err.code, 409);
 
             let mut doc2 = AuthZ::with_pk(aud, sub);
-            doc2.get_one(db, vec![]).await?;
+            doc2.get_one(db, vec![]).await.unwrap();
             assert_eq!(doc2.uid, uid);
 
             let mut doc3 = AuthZ::with_pk(aud, sub);
-            doc3.get_one(db, vec!["scope".to_string()]).await?;
+            doc3.get_one(db, vec!["scope".to_string()]).await.unwrap();
 
             assert_eq!(doc3.uid, uid);
             assert_eq!(doc3._fields, vec!["scope", "uid"]);
@@ -340,7 +337,7 @@ mod tests {
 
             let mut cols = ColumnsMap::new();
             cols.set_as("ip", &"1.2.3.4".to_string());
-            let res = doc.update(db, cols, uid).await?;
+            let res = doc.update(db, cols, uid).await.unwrap();
             assert!(res);
 
             let expire_at = (unix_ms() + 3610 * 1000) as i64;
@@ -351,11 +348,11 @@ mod tests {
 
             let updated_at = doc.updated_at;
             time::sleep(time::Duration::from_millis(10)).await;
-            let res = doc.update(db, cols, uid).await?;
+            let res = doc.update(db, cols, uid).await.unwrap();
             assert!(res);
 
             let mut doc2 = AuthZ::with_pk(aud, sub);
-            doc2.get_one(db, vec![]).await?;
+            doc2.get_one(db, vec![]).await.unwrap();
             assert_eq!(doc2.expire_at, expire_at);
             assert_eq!(doc2.scope, HashSet::from(["read".to_string()]));
             assert_eq!(doc2.ip.as_str(), "1.2.3.4");
@@ -370,18 +367,16 @@ mod tests {
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409);
 
-            let res = doc.delete(db, doc.uid).await?;
+            let res = doc.delete(db, doc.uid).await.unwrap();
             assert!(res);
 
-            let res = doc.delete(db, doc.uid).await?;
+            let res = doc.delete(db, doc.uid).await.unwrap();
             assert!(!res);
         }
-
-        Ok(())
     }
 
     // #[tokio::test(flavor = "current_thread")]
-    async fn list_by_uid_works() -> anyhow::Result<()> {
+    async fn list_by_uid_works() {
         let db = get_db().await;
         let uid = xid::new();
         let _aud = xid::new();
@@ -391,16 +386,15 @@ mod tests {
         for _i in 0..10 {
             let mut doc = AuthZ::with_pk(xid::new(), sub);
             doc.uid = uid;
-            doc.save(db).await?;
+            doc.save(db).await.unwrap();
             docs.push(doc)
         }
 
         assert_eq!(docs.len(), 10);
 
-        let res = AuthZ::list_by_uid(db, uid, Vec::new()).await?;
+        let res = AuthZ::list_by_uid(db, uid, Vec::new()).await.unwrap();
         assert_eq!(res.len(), 10);
         assert_eq!(res[0].aud, docs[9].aud);
         assert_eq!(res[9].aud, docs[0].aud);
-        Ok(())
     }
 }

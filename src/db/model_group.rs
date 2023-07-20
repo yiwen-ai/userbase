@@ -1,5 +1,4 @@
-use axum_web::context::unix_ms;
-use axum_web::erring::HTTPError;
+use axum_web::{context::unix_ms, erring::HTTPError, object::PackObject};
 use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
@@ -561,6 +560,37 @@ impl Group {
         self.updated_at = new_updated_at;
         Ok(true)
     }
+
+    pub async fn batch_get(
+        db: &scylladb::ScyllaDB,
+        ids: Vec<PackObject<xid::Id>>,
+        select_fields: Vec<String>,
+    ) -> anyhow::Result<Vec<Group>> {
+        let fields = Self::select_fields(select_fields, false)?;
+
+        let query = format!(
+            "SELECT {} FROM group WHERE id IN ({}) BYPASS CACHE USING TIMEOUT 3s",
+            fields.clone().join(","),
+            ids.iter().map(|_| "?").collect::<Vec<&str>>().join(",")
+        );
+        let params = ids
+            .into_iter()
+            .map(|id| id.to_cql())
+            .collect::<Vec<CqlValue>>();
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut res: Vec<Group> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = Group::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            res.push(doc);
+        }
+
+        Ok(res)
+    }
 }
 
 #[cfg(test)]
@@ -588,16 +618,15 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
-    async fn test_all() -> anyhow::Result<()> {
+    async fn test_all() {
         // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
-        group_index_model_works().await?;
-        group_model_works().await?;
-
-        Ok(())
+        group_index_model_works().await;
+        group_model_works().await;
+        batch_get_groups_works().await;
     }
 
     // #[tokio::test(flavor = "current_thread")]
-    async fn group_index_model_works() -> anyhow::Result<()> {
+    async fn group_index_model_works() {
         let db = get_db().await;
 
         let id = xid::new();
@@ -606,7 +635,7 @@ mod tests {
             id,
             ..Default::default()
         };
-        c1.save(db, 1000 * 3600).await?;
+        c1.save(db, 1000 * 3600).await.unwrap();
 
         let id = xid::new();
         let mut c2 = GroupIndex {
@@ -614,7 +643,7 @@ mod tests {
             id,
             ..Default::default()
         };
-        c2.save(db, 1000 * 3600).await?;
+        c2.save(db, 1000 * 3600).await.unwrap();
 
         let id = xid::new();
         let mut c3 = GroupIndex {
@@ -622,15 +651,15 @@ mod tests {
             id,
             ..Default::default()
         };
-        c3.save(db, 1000 * 3600).await?;
+        c3.save(db, 1000 * 3600).await.unwrap();
 
         let mut d1 = GroupIndex::with_pk(c1.cn);
-        d1.get_one(db).await?;
+        d1.get_one(db).await.unwrap();
         assert_eq!(d1.id, c1.id);
         assert_eq!(d1.created_at + 1000 * 3600, d1.expire_at);
 
         let mut d2 = GroupIndex::with_pk(c2.cn);
-        d2.get_one(db).await?;
+        d2.get_one(db).await.unwrap();
         assert_eq!(d2.id, c2.id);
         assert_eq!(d2.created_at + 1000 * 3600, d2.expire_at);
 
@@ -640,13 +669,13 @@ mod tests {
         let err: erring::HTTPError = res.unwrap_err().into();
         assert_eq!(err.code, 400);
 
-        let res = d3.update_expire(db, c3.expire_at).await?;
+        let res = d3.update_expire(db, c3.expire_at).await.unwrap();
         assert!(!res);
 
-        let res = d3.update_expire(db, c3.expire_at + 3600).await?;
+        let res = d3.update_expire(db, c3.expire_at + 3600).await.unwrap();
         assert!(res);
 
-        d3.get_one(db).await?;
+        d3.get_one(db).await.unwrap();
         assert_eq!(d3.id, c3.id);
         assert_eq!(d3.expire_at, c3.expire_at + 3600);
 
@@ -658,19 +687,17 @@ mod tests {
 
         let query = "UPDATE group_index SET expire_at=? WHERE cn=? IF EXISTS";
         let params = (unix_ms() as i64 - 1000 * 3600 * 24 * 365 - 1, &d3.cn);
-        db.execute(query, params).await?;
+        db.execute(query, params).await.unwrap();
 
-        let res = d3.reset_cn(db, new_user, 1).await?;
+        let res = d3.reset_cn(db, new_user, 1).await.unwrap();
         assert!(res);
 
-        let res = d3.reset_cn(db, new_user, 1).await?;
+        let res = d3.reset_cn(db, new_user, 1).await.unwrap();
         assert!(!res);
-
-        Ok(())
     }
 
     // #[tokio::test(flavor = "current_thread")]
-    async fn group_model_works() -> anyhow::Result<()> {
+    async fn group_model_works() {
         let db = get_db().await;
         let gid = xid::new();
         let uid = xid::new();
@@ -722,7 +749,7 @@ mod tests {
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 404);
 
-            assert!(doc.save(db).await?);
+            assert!(doc.save(db).await.unwrap());
             assert_eq!(doc.cn, xid_to_cn(&doc.id, 0));
 
             let res = doc.save(db).await;
@@ -731,7 +758,7 @@ mod tests {
             assert_eq!(err.code, 409);
 
             let mut doc2 = Group::with_pk(gid);
-            doc2.get_one(db, vec![]).await?;
+            doc2.get_one(db, vec![]).await.unwrap();
             // println!("doc: {:#?}", doc2);
 
             assert_eq!(doc2.name.as_str(), "Jarvis");
@@ -739,7 +766,7 @@ mod tests {
             assert_eq!(doc2.cn, doc.cn);
 
             let mut doc3 = Group::with_pk(gid);
-            doc3.get_one(db, vec!["name".to_string()]).await?;
+            doc3.get_one(db, vec!["name".to_string()]).await.unwrap();
             assert_eq!(doc3.name.as_str(), "Jarvis");
             assert_eq!(doc3.id, doc.id);
             assert_eq!(doc3.cn, doc.cn);
@@ -749,25 +776,25 @@ mod tests {
         // update status
         {
             let mut doc = Group::with_pk(gid);
-            doc.get_one(db, vec![]).await?;
+            doc.get_one(db, vec![]).await.unwrap();
 
             let res = doc.update_status(db, 2, doc.updated_at - 1).await;
             assert!(res.is_err());
 
-            let res = doc.update_status(db, 2, doc.updated_at).await?;
+            let res = doc.update_status(db, 2, doc.updated_at).await.unwrap();
             assert!(res);
 
-            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            let res = doc.update_status(db, 1, doc.updated_at).await.unwrap();
             assert!(res);
 
-            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            let res = doc.update_status(db, 1, doc.updated_at).await.unwrap();
             assert!(!res);
         }
 
         // update kind
         {
             let mut doc = Group::with_pk(gid);
-            doc.get_one(db, vec![]).await?;
+            doc.get_one(db, vec![]).await.unwrap();
             let res = doc.update_kind(db, -2, doc.updated_at).await;
             assert!(res.is_err());
             let res = doc.update_kind(db, 5, doc.updated_at).await;
@@ -776,20 +803,20 @@ mod tests {
             let res = doc.update_kind(db, 2, doc.updated_at - 1).await;
             assert!(res.is_err());
 
-            let res = doc.update_kind(db, 2, doc.updated_at).await?;
+            let res = doc.update_kind(db, 2, doc.updated_at).await.unwrap();
             assert!(res);
 
-            let res = doc.update_kind(db, 1, doc.updated_at).await?;
+            let res = doc.update_kind(db, 1, doc.updated_at).await.unwrap();
             assert!(res);
 
-            let res = doc.update_kind(db, 1, doc.updated_at).await?;
+            let res = doc.update_kind(db, 1, doc.updated_at).await.unwrap();
             assert!(!res);
         }
 
         // update email
         {
             let mut doc = Group::with_pk(gid);
-            doc.get_one(db, vec![]).await?;
+            doc.get_one(db, vec![]).await.unwrap();
 
             let res = doc
                 .update_email(db, "Jarvis@yiwen.ai".to_string(), doc.updated_at)
@@ -807,17 +834,20 @@ mod tests {
 
             let res = doc
                 .update_email(db, "jarvis@yiwen.ai".to_string(), doc.updated_at)
-                .await?;
+                .await
+                .unwrap();
             assert!(res);
 
             let res = doc
                 .update_email(db, "jarvis2@yiwen.ai".to_string(), doc.updated_at)
-                .await?;
+                .await
+                .unwrap();
             assert!(res);
 
             let res = doc
                 .update_email(db, "jarvis2@yiwen.ai".to_string(), doc.updated_at)
-                .await?;
+                .await
+                .unwrap();
             assert!(!res);
         }
 
@@ -840,7 +870,7 @@ mod tests {
 
             let mut cols = ColumnsMap::new();
             cols.set_as("name", &"Jarvis 1".to_string());
-            let res = doc.update(db, cols, doc.updated_at).await?;
+            let res = doc.update(db, cols, doc.updated_at).await.unwrap();
             assert!(res);
 
             let mut cols = ColumnsMap::new();
@@ -869,14 +899,16 @@ mod tests {
                             "text" => "Hello World 2",
                         }],
                     }],
-                })?,
+                })
+                .unwrap(),
                 &mut description,
-            )?;
+            )
+            .unwrap();
             cols.set_as("description", &description);
-            let res = doc.update(db, cols, doc.updated_at).await?;
+            let res = doc.update(db, cols, doc.updated_at).await.unwrap();
             assert!(res);
 
-            doc.get_one(db, vec![]).await?;
+            doc.get_one(db, vec![]).await.unwrap();
             assert_eq!(doc.name.as_str(), "Jarvis 2");
             assert_eq!(doc.keywords, vec!["test".to_string()]);
             assert_eq!(doc.logo.as_str(), "https://s.yiwen.pub/jarvis.png");
@@ -885,7 +917,28 @@ mod tests {
             assert_eq!(doc.website.as_str(), "https://h.yiwen.pub/jarvis");
             assert_eq!(doc.description, description);
         }
+    }
 
-        Ok(())
+    async fn batch_get_groups_works() {
+        let db = get_db().await;
+        let uid = xid::new();
+
+        let mut docs: Vec<Group> = Vec::new();
+        for i in 0..10 {
+            let mut doc = Group::with_pk(xid::new());
+            doc.name = format!("group {}", i);
+            doc.uid = uid;
+            doc.save(db).await.unwrap();
+
+            docs.push(doc)
+        }
+        assert_eq!(docs.len(), 10);
+
+        let to = PackObject::Cbor(());
+
+        let ids: Vec<PackObject<xid::Id>> = docs.iter().map(|doc| to.with(doc.id)).collect();
+
+        let groups = Group::batch_get(db, ids, Vec::new()).await.unwrap();
+        assert_eq!(groups.len(), 10);
     }
 }
