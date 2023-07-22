@@ -391,15 +391,16 @@ impl Member {
         }
 
         let mut res: Vec<Group> = Vec::with_capacity(members.len());
-        let mut fields = Group::select_fields(select_fields, true)?;
-        fields.push("_role".to_string());
-        fields.push("_priority".to_string());
+        let fields = Group::select_fields(select_fields, true)?;
+        let mut out_fields = fields.clone();
+        out_fields.push("_role".to_string());
+        out_fields.push("_priority".to_string());
         for m in members {
             let mut doc = Group::with_pk(m.gid);
             doc.get_one(db, fields.clone()).await?;
             doc._role = m.role;
             doc._priority = m.priority;
-            doc._fields = fields.clone();
+            doc._fields = out_fields.clone();
             res.push(doc);
         }
 
