@@ -467,6 +467,8 @@ pub async fn list_groups(
     usergroup.get_one(&app.scylla, fields.clone()).await?;
     usergroup._role = 2i8;
     usergroup._priority = 2i8;
+    usergroup._fields.push("_role".to_string());
+    usergroup._fields.push("_priority".to_string());
 
     let mut res = db::Member::list_groups(
         &app.scylla,
