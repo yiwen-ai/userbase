@@ -465,6 +465,9 @@ pub async fn list_groups(
     let fields = input.fields.unwrap_or_default();
     let mut usergroup = db::Group::with_pk(ctx.user);
     usergroup.get_one(&app.scylla, fields.clone()).await?;
+    usergroup._role = 2i8;
+    usergroup._priority = 2i8;
+
     let mut res = db::Member::list_groups(
         &app.scylla,
         ctx.user,
@@ -561,8 +564,8 @@ pub async fn get_group(
     ])
     .await;
 
-    let role = if gid == ctx.user {
-        2i8
+    let (role, priority) = if gid == ctx.user {
+        (2i8, 2i8)
     } else {
         let mut member = db::Member::with_pk(gid, ctx.user);
         let res = member.get_one(&app.scylla, vec!["role".to_string()]).await;
@@ -570,13 +573,15 @@ pub async fn get_group(
             return Err(HTTPError::new(403, "not a group member".to_string()));
         }
 
-        member.role
+        (member.role, member.priority)
     };
 
     let mut doc = db::Group::with_pk(gid);
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
     doc._role = role;
+    doc._priority = priority;
     doc._fields.push("_role".to_string());
+    doc._fields.push("_priority".to_string());
     Ok(to.with(SuccessResponse::new(GroupOutput::from(doc, &to))))
 }
