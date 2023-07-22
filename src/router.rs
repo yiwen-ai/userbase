@@ -76,7 +76,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route("/update_email", routing::patch(api::user::update_email))
                 .route("/update_phone", routing::patch(api::user::update_phone))
                 .route("/get_group", routing::get(api::user::get_group))
-                .route("/list_groups", routing::patch(api::user::list_groups)),
+                .route("/list_groups", routing::post(api::user::list_groups)),
         )
         .nest(
             "/v1/group",

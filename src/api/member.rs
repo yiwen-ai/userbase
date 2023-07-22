@@ -2,7 +2,6 @@ use axum::{
     extract::{Query, State},
     Extension,
 };
-
 use serde::{Deserialize, Serialize};
 use std::{convert::From, sync::Arc};
 use validator::Validate;
@@ -12,7 +11,6 @@ use crate::db;
 use axum_web::context::ReqContext;
 use axum_web::erring::{HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
-
 
 use crate::api::{user::UserOutput, AppState, QueryGidUid};
 

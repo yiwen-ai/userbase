@@ -2,7 +2,6 @@ use axum::{
     extract::{Query, State},
     Extension,
 };
-
 use serde::{Deserialize, Serialize};
 use std::{convert::From, sync::Arc};
 use validator::Validate;

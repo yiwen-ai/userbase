@@ -1,6 +1,5 @@
 // use hex_literal::hex;
 use base64ct::{Base64UrlUnpadded, Encoding};
-
 mod cose_key;
 mod eddsa_token;
 mod encrypt;

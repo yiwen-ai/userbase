@@ -6,7 +6,6 @@ use chrono::{Datelike, NaiveDate, NaiveDateTime};
 use isolang::Language;
 use serde::{Deserialize, Serialize};
 use std::{convert::From, sync::Arc};
-use std::{ops::Add};
 use validator::Validate;
 
 use crate::db;
@@ -460,10 +459,13 @@ pub async fn list_groups(
     input.validate()?;
 
     let page_size = input.page_size.unwrap_or(10);
-    ctx.set_kvs(vec![("action", "list_users".into())]).await;
+    ctx.set_kvs(vec![("action", "list_user_groups".into())])
+        .await;
 
     let fields = input.fields.unwrap_or_default();
-    let res = db::Member::list_groups(
+    let mut usergroup = db::Group::with_pk(ctx.user);
+    usergroup.get_one(&app.scylla, fields.clone()).await?;
+    let mut res = db::Member::list_groups(
         &app.scylla,
         ctx.user,
         fields,
@@ -480,6 +482,7 @@ pub async fn list_groups(
         None
     };
 
+    res.insert(0, usergroup);
     Ok(to.with(SuccessResponse {
         total_size: None,
         next_page_token,

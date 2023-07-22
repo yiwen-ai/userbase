@@ -9,7 +9,6 @@ use axum::{
     Extension,
 };
 use cookie::Cookie;
-
 use serde::{Deserialize, Serialize};
 use std::{convert::From, str::FromStr, sync::Arc};
 use validator::Validate;
