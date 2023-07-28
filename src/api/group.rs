@@ -15,7 +15,7 @@ use scylla_orm::ColumnsMap;
 
 use crate::api::{
     get_fields, member::MemberOutput, token_from_xid, token_to_xid, user::UserOutput, AppState,
-    BatchIdsInput, Pagination, QueryIdCn, UpdateSpecialFieldInput,
+    BatchIdsInput, GidPagination, QueryIdCn, UpdateSpecialFieldInput,
 };
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -340,7 +340,7 @@ pub async fn update_email(
 pub async fn list_users(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<Pagination>,
+    to: PackObject<GidPagination>,
 ) -> Result<PackObject<SuccessResponse<Vec<UserOutput>>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
@@ -379,7 +379,7 @@ pub async fn list_users(
 pub async fn list_members(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<Pagination>,
+    to: PackObject<GidPagination>,
 ) -> Result<PackObject<SuccessResponse<Vec<MemberOutput>>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;

@@ -98,6 +98,16 @@ pub struct QueryGid {
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct Pagination {
+    pub page_token: Option<PackObject<Vec<u8>>>,
+    #[validate(range(min = 2, max = 1000))]
+    pub page_size: Option<u16>,
+    #[validate(range(min = -1, max = 2))]
+    pub status: Option<i8>,
+    pub fields: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct GidPagination {
     pub gid: PackObject<xid::Id>,
     pub page_token: Option<PackObject<Vec<u8>>>,
     #[validate(range(min = 2, max = 1000))]
