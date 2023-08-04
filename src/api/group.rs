@@ -15,7 +15,7 @@ use scylla_orm::ColumnsMap;
 
 use crate::api::{
     get_fields, member::MemberOutput, token_from_xid, token_to_xid, user::UserOutput, AppState,
-    BatchIdsInput, GidPagination, QueryIdCn, UpdateSpecialFieldInput,
+    BatchIdsInput, GidPagination, Pagination, QueryGid, QueryIdCn, UpdateSpecialFieldInput,
 };
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -150,14 +150,14 @@ pub async fn get(
         let mut index = db::GroupIndex::with_pk(input.cn.as_ref().unwrap().to_owned());
         index.get_one(&app.scylla).await?;
         if index.expire_at < unix_ms() as i64 {
-            return Err(HTTPError::new(404, format!("user {} not found", index.cn)));
+            return Err(HTTPError::new(404, format!("group {} not found", index.cn)));
         }
 
         index.id
     };
 
     ctx.set_kvs(vec![
-        ("action", "get_user".into()),
+        ("action", "get_group".into()),
         ("id", id.to_string().into()),
     ])
     .await;
@@ -386,7 +386,7 @@ pub async fn list_members(
 
     let gid = input.gid.unwrap();
     let page_size = input.page_size.unwrap_or(10);
-    ctx.set_kvs(vec![("action", "list_users".into())]).await;
+    ctx.set_kvs(vec![("action", "list_members".into())]).await;
 
     let fields = input.fields.unwrap_or_default();
     let res = db::Member::list_members(
@@ -466,4 +466,214 @@ pub async fn batch_get_info(
         .collect();
 
     Ok(to.with(SuccessResponse::new(output)))
+}
+
+pub async fn get_by_user(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<QueryGid>,
+) -> Result<PackObject<SuccessResponse<GroupOutput>>, HTTPError> {
+    input.validate()?;
+
+    let gid = *input.gid.to_owned();
+    ctx.set_kvs(vec![
+        ("action", "get_user_group".into()),
+        ("gid", gid.to_string().into()),
+    ])
+    .await;
+
+    let (role, priority) = if gid == ctx.user {
+        (2i8, 2i8)
+    } else {
+        let mut member = db::Member::with_pk(gid, ctx.user);
+        let res = member.get_one(&app.scylla, vec!["role".to_string()]).await;
+        if res.is_err() || member.role < -1 {
+            return Err(HTTPError::new(403, "not a group member".to_string()));
+        }
+
+        (member.role, member.priority)
+    };
+
+    let mut doc = db::Group::with_pk(gid);
+    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
+        .await?;
+    doc._role = role;
+    doc._priority = priority;
+    doc._fields.push("_role".to_string());
+    doc._fields.push("_priority".to_string());
+    Ok(to.with(SuccessResponse::new(GroupOutput::from(doc, &to))))
+}
+
+pub async fn list_by_user(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<Pagination>,
+) -> Result<PackObject<SuccessResponse<Vec<GroupOutput>>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+
+    let page_size = input.page_size.unwrap_or(10);
+    ctx.set_kvs(vec![("action", "list_user_groups".into())])
+        .await;
+
+    let fields = input.fields.unwrap_or_default();
+    let mut usergroup = db::Group::with_pk(ctx.user);
+    usergroup.get_one(&app.scylla, fields.clone()).await?;
+    usergroup._role = 2i8;
+    usergroup._priority = 2i8;
+    usergroup._fields.push("_role".to_string());
+    usergroup._fields.push("_priority".to_string());
+
+    let mut res = db::Member::list_groups(
+        &app.scylla,
+        ctx.user,
+        fields,
+        page_size,
+        token_to_xid(&input.page_token),
+        input.status,
+    )
+    .await?;
+
+    let next_page_token = if res.len() >= page_size as usize {
+        let v = res.last().unwrap();
+        to.with_option(token_from_xid(v.id))
+    } else {
+        None
+    };
+
+    res.insert(0, usergroup);
+    Ok(to.with(SuccessResponse {
+        total_size: None,
+        next_page_token,
+        result: res
+            .iter()
+            .map(|r| GroupOutput::from(r.to_owned(), &to))
+            .collect(),
+    }))
+}
+
+pub async fn follow(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<QueryIdCn>,
+) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
+    input.validate()?;
+    let id = if input.id.is_some() {
+        input.id.as_ref().unwrap().to_owned().unwrap()
+    } else {
+        if input.cn.is_none() {
+            return Err(HTTPError::new(400, "id or cn is required".into()));
+        }
+
+        let mut index = db::GroupIndex::with_pk(input.cn.as_ref().unwrap().to_owned());
+        index.get_one(&app.scylla).await?;
+        if index.expire_at < unix_ms() as i64 {
+            return Err(HTTPError::new(404, format!("group {} not found", index.cn)));
+        }
+
+        index.id
+    };
+
+    ctx.set_kvs(vec![
+        ("action", "follow_group".into()),
+        ("id", id.to_string().into()),
+    ])
+    .await;
+
+    let mut doc = db::Follow::with_pk(ctx.user, id);
+    let res = doc.save(&app.scylla).await?;
+    Ok(to.with(SuccessResponse::new(res)))
+}
+
+pub async fn unfollow(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<QueryIdCn>,
+) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
+    input.validate()?;
+    let id = if input.id.is_some() {
+        input.id.as_ref().unwrap().to_owned().unwrap()
+    } else {
+        if input.cn.is_none() {
+            return Err(HTTPError::new(400, "id or cn is required".into()));
+        }
+
+        let mut index = db::GroupIndex::with_pk(input.cn.as_ref().unwrap().to_owned());
+        index.get_one(&app.scylla).await?;
+        if index.expire_at < unix_ms() as i64 {
+            return Err(HTTPError::new(404, format!("group {} not found", index.cn)));
+        }
+
+        index.id
+    };
+
+    ctx.set_kvs(vec![
+        ("action", "unfollow_group".into()),
+        ("id", id.to_string().into()),
+    ])
+    .await;
+
+    let mut doc = db::Follow::with_pk(ctx.user, id);
+    let res = doc.delete(&app.scylla).await?;
+    Ok(to.with(SuccessResponse::new(res)))
+}
+
+pub async fn list_following(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<Pagination>,
+) -> Result<PackObject<SuccessResponse<Vec<GroupOutput>>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+
+    let page_size = input.page_size.unwrap_or(10);
+    ctx.set_kvs(vec![("action", "list_following_groups".into())])
+        .await;
+
+    let fields = input.fields.unwrap_or_default();
+    let res = db::Follow::list_groups(
+        &app.scylla,
+        ctx.user,
+        fields,
+        page_size,
+        token_to_xid(&input.page_token),
+    )
+    .await?;
+
+    let next_page_token = if res.len() >= page_size as usize {
+        let v = res.last().unwrap();
+        to.with_option(token_from_xid(v.id))
+    } else {
+        None
+    };
+
+    Ok(to.with(SuccessResponse {
+        total_size: None,
+        next_page_token,
+        result: res
+            .iter()
+            .map(|r| GroupOutput::from(r.to_owned(), &to))
+            .collect(),
+    }))
+}
+
+pub async fn following_ids(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<Pagination>,
+) -> Result<PackObject<SuccessResponse<Vec<PackObject<xid::Id>>>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+
+    ctx.set_kvs(vec![("action", "following_gids".into())]).await;
+    let res = db::Follow::all_gids(&app.scylla, ctx.user).await?;
+
+    Ok(to.with(SuccessResponse {
+        total_size: None,
+        next_page_token: None,
+        result: res.iter().map(|r| to.with(r.to_owned())).collect(),
+    }))
 }

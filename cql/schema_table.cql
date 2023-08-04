@@ -93,6 +93,20 @@ CREATE TABLE IF NOT EXISTS member (
 CREATE INDEX member_uid ON member (uid);
 CREATE INDEX member_gid_role ON member ((gid), role);
 
+CREATE TABLE IF NOT EXISTS follow (
+    uid        BLOB,    -- user id, 12 bytes XID
+    gid        BLOB,    -- group id, 12 bytes XID
+    created_at BIGINT,  -- create at
+    PRIMARY KEY (uid, gid)
+) WITH CLUSTERING ORDER BY (gid ASC)
+    AND caching = {'enabled': 'true'}
+    AND comment = 'user followed groups'
+    AND compaction = {'class': 'SizeTieredCompactionStrategy'}
+    AND compression = {'sstable_compression': 'LZ4Compressor'}
+    AND default_time_to_live = 0;
+
+CREATE INDEX follow_gid ON follow (gid);
+
 CREATE TABLE IF NOT EXISTS authn (
     idp        TEXT,      -- identity provider, such as github, webchat, phone, email...
     aud        TEXT,      -- audience - app id (or client id) from provider

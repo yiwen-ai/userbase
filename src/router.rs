@@ -74,9 +74,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route("/", routing::get(api::user::get).patch(api::user::update))
                 .route("/batch_get_info", routing::post(api::user::batch_get_info))
                 .route("/update_email", routing::patch(api::user::update_email))
-                .route("/update_phone", routing::patch(api::user::update_phone))
-                .route("/get_group", routing::get(api::user::get_group))
-                .route("/list_groups", routing::post(api::user::list_groups)),
+                .route("/update_phone", routing::patch(api::user::update_phone)),
         )
         .nest(
             "/v1/group",
@@ -91,8 +89,14 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route("/update_status", routing::patch(api::group::update_status))
                 .route("/update_kind", routing::patch(api::group::update_kind))
                 .route("/update_email", routing::patch(api::group::update_email))
+                .route("/follow", routing::patch(api::group::follow))
+                .route("/unfollow", routing::patch(api::group::unfollow))
+                .route("/get_by_user", routing::get(api::group::get_by_user))
                 .route("/list_users", routing::post(api::group::list_users))
                 .route("/list_members", routing::post(api::group::list_members))
+                .route("/list_by_user", routing::post(api::group::list_by_user))
+                .route("/list_following", routing::post(api::group::list_following))
+                .route("/following_ids", routing::post(api::group::following_ids))
                 .nest(
                     "/member",
                     Router::new()

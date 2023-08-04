@@ -1,5 +1,6 @@
 mod model_authn;
 mod model_authz;
+mod model_follow;
 mod model_group;
 mod model_member;
 mod model_session;
@@ -9,6 +10,7 @@ pub mod scylladb;
 
 pub use model_authn::AuthN;
 pub use model_authz::AuthZ;
+pub use model_follow::Follow;
 pub use model_group::{Group, GroupIndex};
 pub use model_member::Member;
 pub use model_session::Session;
