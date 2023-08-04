@@ -96,7 +96,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route("/list_members", routing::post(api::group::list_members))
                 .route("/list_by_user", routing::post(api::group::list_by_user))
                 .route("/list_following", routing::post(api::group::list_following))
-                .route("/following_ids", routing::post(api::group::following_ids))
+                .route("/following_ids", routing::get(api::group::following_ids))
                 .nest(
                     "/member",
                     Router::new()

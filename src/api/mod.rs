@@ -85,14 +85,14 @@ pub struct QueryGidUid {
 }
 
 #[derive(Debug, Deserialize, Validate)]
-pub struct QuerySid {
-    pub sid: PackObject<xid::Id>,
+pub struct QueryId {
+    pub id: PackObject<xid::Id>,
     pub fields: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Validate)]
-pub struct QueryGid {
-    pub gid: PackObject<xid::Id>,
+pub struct QuerySid {
+    pub sid: PackObject<xid::Id>,
     pub fields: Option<String>,
 }
 

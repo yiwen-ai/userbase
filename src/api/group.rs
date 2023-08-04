@@ -15,7 +15,7 @@ use scylla_orm::ColumnsMap;
 
 use crate::api::{
     get_fields, member::MemberOutput, token_from_xid, token_to_xid, user::UserOutput, AppState,
-    BatchIdsInput, GidPagination, Pagination, QueryGid, QueryIdCn, UpdateSpecialFieldInput,
+    BatchIdsInput, GidPagination, Pagination, QueryId, QueryIdCn, UpdateSpecialFieldInput,
 };
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -472,21 +472,21 @@ pub async fn get_by_user(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
-    input: Query<QueryGid>,
+    input: Query<QueryId>,
 ) -> Result<PackObject<SuccessResponse<GroupOutput>>, HTTPError> {
     input.validate()?;
 
-    let gid = *input.gid.to_owned();
+    let id = *input.id.to_owned();
     ctx.set_kvs(vec![
         ("action", "get_user_group".into()),
-        ("gid", gid.to_string().into()),
+        ("id", id.to_string().into()),
     ])
     .await;
 
-    let (role, priority) = if gid == ctx.user {
+    let (role, priority) = if id == ctx.user {
         (2i8, 2i8)
     } else {
-        let mut member = db::Member::with_pk(gid, ctx.user);
+        let mut member = db::Member::with_pk(id, ctx.user);
         let res = member.get_one(&app.scylla, vec!["role".to_string()]).await;
         if res.is_err() || member.role < -1 {
             return Err(HTTPError::new(403, "not a group member".to_string()));
@@ -495,7 +495,7 @@ pub async fn get_by_user(
         (member.role, member.priority)
     };
 
-    let mut doc = db::Group::with_pk(gid);
+    let mut doc = db::Group::with_pk(id);
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
     doc._role = role;
@@ -556,9 +556,9 @@ pub async fn list_by_user(
 pub async fn follow(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<()>,
-    input: Query<QueryIdCn>,
+    to: PackObject<QueryIdCn>,
 ) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
     let id = if input.id.is_some() {
         input.id.as_ref().unwrap().to_owned().unwrap()
@@ -590,10 +590,11 @@ pub async fn follow(
 pub async fn unfollow(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<()>,
-    input: Query<QueryIdCn>,
+    to: PackObject<QueryIdCn>,
 ) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
+
     let id = if input.id.is_some() {
         input.id.as_ref().unwrap().to_owned().unwrap()
     } else {
@@ -662,12 +663,9 @@ pub async fn list_following(
 
 pub async fn following_ids(
     State(app): State<Arc<AppState>>,
+    to: PackObject<()>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<Pagination>,
 ) -> Result<PackObject<SuccessResponse<Vec<PackObject<xid::Id>>>>, HTTPError> {
-    let (to, input) = to.unpack();
-    input.validate()?;
-
     ctx.set_kvs(vec![("action", "following_gids".into())]).await;
     let res = db::Follow::all_gids(&app.scylla, ctx.user).await?;
 
