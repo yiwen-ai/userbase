@@ -596,7 +596,14 @@ pub async fn verify_token(
 
 pub async fn forward_auth(State(app): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     let mut res_headers = HeaderMap::new();
-    let deault_value = HeaderValue::from_static("");
+    let default_value = HeaderValue::from_static("");
+
+    // add X-Request-Id, ignore client's X-Request-Id
+    let request_id = ulid::Ulid::new().to_string();
+    res_headers.insert(
+        "x-request-id",
+        request_id.parse().unwrap_or_else(|_| default_value.clone()),
+    );
 
     // add X-Real-Ip
     if let Some(forwarded_for) = headers.get("x-forwarded-for") {
@@ -605,24 +612,11 @@ pub async fn forward_auth(State(app): State<Arc<AppState>>, headers: HeaderMap) 
             if !real_ip.is_empty() {
                 res_headers.insert(
                     "x-real-ip",
-                    real_ip.parse().unwrap_or_else(|_| deault_value.clone()),
+                    real_ip.parse().unwrap_or_else(|_| default_value.clone()),
                 );
             }
         }
     }
-
-    // add X-Request-Id
-    let mut request_id = headers
-        .get("x-request-id")
-        .map(|v| v.to_str().unwrap_or_default().to_string())
-        .unwrap_or_default();
-    if request_id.is_empty() {
-        request_id = uuid::Uuid::new_v4().to_string();
-    }
-    res_headers.insert(
-        "x-request-id",
-        request_id.parse().unwrap_or_else(|_| deault_value.clone()),
-    );
 
     let mut session = headers
         .get("x-session")
@@ -652,7 +646,7 @@ pub async fn forward_auth(State(app): State<Arc<AppState>>, headers: HeaderMap) 
     if !device_id.is_empty() {
         res_headers.insert(
             "x-device-id",
-            device_id.parse().unwrap_or_else(|_| deault_value.clone()),
+            device_id.parse().unwrap_or_else(|_| default_value.clone()),
         );
     }
 
