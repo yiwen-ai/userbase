@@ -19,7 +19,7 @@ use crate::api::{get_fields, AppState, BatchIdsInput, QueryIdCn, UpdateSpecialFi
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CreateUserInput {
-    #[validate(length(min = 3, max = 24))]
+    #[validate(length(min = 2, max = 64))]
     pub name: String,
     pub locale: PackObject<Language>,
     #[validate(url)]
@@ -224,13 +224,13 @@ pub async fn get(
 pub struct UpdateUserInput {
     pub id: PackObject<xid::Id>,
     pub updated_at: i64,
-    #[validate(length(min = 3, max = 24))]
+    #[validate(length(min = 2, max = 64))]
     pub name: Option<String>,
     pub birthdate: Option<String>,
     pub locale: Option<PackObject<Language>>,
     #[validate(url)]
     pub picture: Option<String>,
-    #[validate(length(min = 2, max = 128))]
+    #[validate(length(min = 2, max = 256))]
     pub address: Option<String>,
     #[validate(url)]
     pub website: Option<String>,

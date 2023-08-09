@@ -17,11 +17,11 @@ use crate::db;
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct AuthNInput {
-    #[validate(length(min = 3, max = 10))]
+    #[validate(length(min = 2, max = 16))]
     pub idp: String,
-    #[validate(length(min = 3, max = 40))]
+    #[validate(length(min = 2, max = 128))]
     pub aud: String,
-    #[validate(length(min = 3, max = 60))]
+    #[validate(length(min = 2, max = 64))]
     pub sub: String,
     pub expires_in: i32,
     pub scope: HashSet<String>,
@@ -218,11 +218,11 @@ pub async fn list(
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct AuthNPKInput {
-    #[validate(length(min = 3, max = 10))]
+    #[validate(length(min = 2, max = 16))]
     pub idp: String,
-    #[validate(length(min = 3, max = 40))]
+    #[validate(length(min = 2, max = 128))]
     pub aud: String,
-    #[validate(length(min = 3, max = 60))]
+    #[validate(length(min = 2, max = 64))]
     pub sub: String,
     pub fields: Option<String>,
 }

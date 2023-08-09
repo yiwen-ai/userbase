@@ -20,7 +20,7 @@ use crate::api::{
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CreateGroupInput {
-    #[validate(length(min = 3, max = 24))]
+    #[validate(length(min = 2, max = 64))]
     pub name: String,
     #[validate(url)]
     pub logo: Option<String>,
@@ -172,15 +172,15 @@ pub async fn get(
 pub struct UpdateGroupInput {
     pub id: PackObject<xid::Id>,
     pub updated_at: i64,
-    #[validate(length(min = 3, max = 24))]
+    #[validate(length(min = 2, max = 64))]
     pub name: Option<String>,
     #[validate(length(min = 0, max = 6))]
     pub keywords: Option<Vec<String>>,
     #[validate(url)]
     pub logo: Option<String>,
-    #[validate(length(min = 10, max = 127))]
+    #[validate(length(min = 2, max = 128))]
     pub slogan: Option<String>,
-    #[validate(length(min = 3, max = 127))]
+    #[validate(length(min = 2, max = 128))]
     pub address: Option<String>,
     #[validate(url)]
     pub website: Option<String>,
