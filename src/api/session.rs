@@ -32,6 +32,8 @@ pub struct SessionInput {
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct SessionVerifyOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub sid: Option<PackObject<xid::Id>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub uid: Option<PackObject<xid::Id>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub: Option<PackObject<uuid::Uuid>>,
@@ -80,6 +82,7 @@ pub async fn min_verify(
     }
 
     let output = SessionVerifyOutput {
+        sid: Some(to.with(sid)),
         uid: Some(to.with(uid)),
         sub: sub.map(|v| to.with(v)),
         access_token: None,
@@ -139,6 +142,7 @@ pub async fn verify(
     }
 
     let output = SessionVerifyOutput {
+        sid: Some(to.with(sid)),
         uid: Some(to.with(uid)),
         sub: sub.map(|v| to.with(v)),
         access_token: None,
@@ -327,6 +331,7 @@ pub async fn renew_token(
     }
 
     Ok(to.with(SuccessResponse::new(SessionVerifyOutput {
+        sid: None,
         uid: None,
         sub: Some(to.with(sub)),
         access_token: Some(crypto::base64url_encode(&token)),

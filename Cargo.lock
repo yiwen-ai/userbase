@@ -2471,7 +2471,7 @@ dependencies = [
 
 [[package]]
 name = "userbase"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "aes-gcm",
  "aes-kw",
