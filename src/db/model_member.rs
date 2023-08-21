@@ -287,18 +287,17 @@ impl Member {
 
         let rows = if let Some(uid) = page_token {
             if role.is_none() {
-                let query = Query::new(format!(
+                let query = format!(
                 "SELECT {} FROM member WHERE gid=? AND uid>? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(",")))
-                .with_page_size(page_size as i32);
+                fields.clone().join(","));
                 let params = (gid.to_cql(), uid.to_cql(), page_size as i32);
-                db.execute_paged(query, params, None).await?
+                db.execute_iter(query, params).await?
             } else {
-                let query = Query::new(format!(
+                let query = format!(
                     "SELECT {} FROM member WHERE gid=? AND uid>? AND role=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                    fields.clone().join(","))).with_page_size(page_size as i32);
+                    fields.clone().join(","));
                 let params = (gid.to_cql(), uid.to_cql(), role.unwrap(), page_size as i32);
-                db.execute_paged(query, params, None).await?
+                db.execute_iter(query, params).await?
             }
         } else if role.is_none() {
             let query = Query::new(format!(
@@ -345,19 +344,18 @@ impl Member {
             "created_at".to_string(),
         ];
         let rows = if priority.is_none() {
-            let query = Query::new(format!(
+            let query = format!(
                 "SELECT {} FROM member WHERE uid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 member_fields.clone().join(",")
-            ))
-            .with_page_size(1000i32);
+            );
             let params = (uid.to_cql(), 1000i32);
-            db.execute_paged(query, params, None).await?
+            db.execute_iter(query, params).await?
         } else {
-            let query = Query::new(format!(
+            let query = format!(
                     "SELECT {} FROM member WHERE uid=? AND priority=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
-                    member_fields.clone().join(","))).with_page_size(1000i32);
+                    member_fields.clone().join(","));
             let params = (uid.to_cql(), priority.unwrap(), 1000i32);
-            db.execute_paged(query, params, None).await?
+            db.execute_iter(query, params).await?
         };
 
         let mut members: Vec<Member> = Vec::with_capacity(rows.len());

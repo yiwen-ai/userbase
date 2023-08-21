@@ -3,10 +3,7 @@ use axum_web::erring::HTTPError;
 use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
-use crate::db::{
-    scylladb,
-    scylladb::{extract_applied, Query},
-};
+use crate::db::{scylladb, scylladb::extract_applied};
 
 use super::Group;
 
@@ -120,11 +117,9 @@ impl Follow {
     }
 
     pub async fn all_gids(db: &scylladb::ScyllaDB, uid: xid::Id) -> anyhow::Result<Vec<xid::Id>> {
-        let query =
-            Query::new("SELECT gid FROM follow WHERE uid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s")
-                .with_page_size(1000i32);
+        let query = "SELECT gid FROM follow WHERE uid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s";
         let params = (uid.to_cql(), 1000i32);
-        let rows = db.execute_paged(query, params, None).await?;
+        let rows = db.execute_iter(query, params).await?;
 
         let mut gids: Vec<xid::Id> = Vec::with_capacity(rows.len());
         let follow_fields = vec!["gid".to_string()];
@@ -147,13 +142,12 @@ impl Follow {
         page_token: Option<xid::Id>,
     ) -> anyhow::Result<Vec<Group>> {
         let follow_fields = Self::fields();
-        let query = Query::new(format!(
+        let query = format!(
             "SELECT {} FROM follow WHERE uid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
             follow_fields.clone().join(",")
-        ))
-        .with_page_size(1000i32);
+        );
         let params = (uid.to_cql(), 1000i32);
-        let rows = db.execute_paged(query, params, None).await?;
+        let rows = db.execute_iter(query, params).await?;
 
         let mut follows: Vec<Follow> = Vec::with_capacity(rows.len());
         for row in rows {

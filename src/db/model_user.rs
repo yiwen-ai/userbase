@@ -5,11 +5,7 @@ use axum_web::{context::unix_ms, erring::HTTPError, object::PackObject};
 use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
-use crate::db::{
-    scylladb,
-    scylladb::{extract_applied, Query},
-    xid_to_cn,
-};
+use crate::db::{scylladb, scylladb::extract_applied, xid_to_cn};
 
 #[derive(Debug, Default, Clone, CqlOrm)]
 pub struct UserIndex {
@@ -752,18 +748,17 @@ impl User {
         let id_fields = vec!["id".to_string()];
 
         let rows = if status.is_none() {
-            let query = Query::new(format!(
+            let query = format!(
                 "SELECT {} FROM user WHERE gid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 id_fields.clone().join(",")
-            ))
-            .with_page_size(1000i32);
+            );
             let params = (gid.to_cql(), 1000i32);
-            db.execute_paged(query, params, None).await?
+            db.execute_iter(query, params).await?
         } else {
-            let query = Query::new(format!(
-                "SELECT {} FROM user WHERE gid=? AND status=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s", id_fields.clone().join(","))).with_page_size(1000i32);
+            let query = format!(
+                "SELECT {} FROM user WHERE gid=? AND status=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s", id_fields.clone().join(","));
             let params = (gid.to_cql(), status.unwrap(), 1000i32);
-            db.execute_paged(query, params, None).await?
+            db.execute_iter(query, params).await?
         };
 
         let mut users: Vec<User> = Vec::with_capacity(rows.len());
