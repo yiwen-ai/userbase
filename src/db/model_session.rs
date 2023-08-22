@@ -3,10 +3,7 @@ use axum_web::erring::HTTPError;
 use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
-use crate::db::{
-    scylladb,
-    scylladb::{extract_applied, Query},
-};
+use crate::db::{scylladb, scylladb::extract_applied};
 
 const SESSION_TTL_DEFAULT: i32 = 3600 * 24 * 30; // 30 days
 const SESSION_TTL_MIN: i32 = 1;
@@ -212,11 +209,10 @@ impl Session {
     ) -> anyhow::Result<Vec<Session>> {
         let fields = Self::select_fields(select_fields, true)?;
 
-        let query = Query::new(format!(
+        let query = format!(
             "SELECT {} FROM session WHERE uid=? LIMIT 1000 BYPASS CACHE USING TIMEOUT 3s",
             fields.clone().join(",")
-        ))
-        .with_page_size(1000i32);
+        );
         let params = (uid.to_cql(),);
         let rows = db.execute_iter(query, params).await?;
 

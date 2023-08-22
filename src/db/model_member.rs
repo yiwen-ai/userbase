@@ -3,10 +3,7 @@ use axum_web::erring::HTTPError;
 use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
-use crate::db::{
-    scylladb,
-    scylladb::{extract_applied, Query},
-};
+use crate::db::{scylladb, scylladb::extract_applied};
 
 use super::Group;
 
@@ -300,18 +297,17 @@ impl Member {
                 db.execute_iter(query, params).await?
             }
         } else if role.is_none() {
-            let query = Query::new(format!(
+            let query = format!(
                 "SELECT {} FROM member WHERE gid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")
-            ))
-            .with_page_size(page_size as i32);
+            );
             let params = (gid.to_cql(), page_size as i32);
             db.execute_iter(query, params).await?
         } else {
-            let query = Query::new(format!(
+            let query = format!(
                 "SELECT {} FROM member WHERE gid=? AND role=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")
-            )).with_page_size(page_size as i32);
+            );
             let params = (gid.as_bytes(), role.unwrap(), page_size as i32);
             db.execute_iter(query, params).await?
         };

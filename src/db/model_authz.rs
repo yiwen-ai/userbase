@@ -5,10 +5,7 @@ use axum_web::erring::HTTPError;
 use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
-use crate::db::{
-    scylladb,
-    scylladb::{extract_applied, Query},
-};
+use crate::db::{scylladb, scylladb::extract_applied};
 
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct AuthZ {
@@ -230,11 +227,10 @@ impl AuthZ {
     ) -> anyhow::Result<Vec<AuthZ>> {
         let fields = Self::select_fields(select_fields, true)?;
 
-        let query = Query::new(format!(
+        let query = format!(
             "SELECT {} FROM authz WHERE uid=? LIMIT 1000 BYPASS CACHE USING TIMEOUT 3s",
             fields.clone().join(",")
-        ))
-        .with_page_size(1000i32);
+        );
         let params = (uid.to_cql(),);
         let rows = db.execute_iter(query, params).await?;
 
