@@ -166,9 +166,13 @@ pub async fn get(
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
     if ctx.user > db::MIN_ID {
-        let mut member = db::Member::with_pk(id, ctx.user);
-        let res = member.get_one(&app.scylla, vec!["role".to_string()]).await;
-        doc._role = if res.is_ok() { member.role } else { -2 };
+        if ctx.user == doc.uid {
+            doc._role = 2;
+        } else {
+            let mut member = db::Member::with_pk(id, ctx.user);
+            let res = member.get_one(&app.scylla, vec!["role".to_string()]).await;
+            doc._role = if res.is_ok() { member.role } else { -2 };
+        }
         doc._fields.push("_role".to_string());
     }
     Ok(to.with(SuccessResponse::new(GroupOutput::from(doc, &to))))
@@ -489,7 +493,11 @@ pub async fn get_by_user(
     ])
     .await;
 
-    let (role, priority) = if id == ctx.user {
+    let mut doc = db::Group::with_pk(id);
+    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
+        .await?;
+
+    let (role, priority) = if doc.uid == ctx.user {
         (2i8, 2i8)
     } else {
         let mut member = db::Member::with_pk(id, ctx.user);
@@ -500,10 +508,6 @@ pub async fn get_by_user(
 
         (member.role, member.priority)
     };
-
-    let mut doc = db::Group::with_pk(id);
-    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
-        .await?;
     doc._role = role;
     doc._priority = priority;
     doc._fields.push("_role".to_string());
