@@ -19,7 +19,7 @@ use crate::api::{get_fields, AppState, BatchIdsInput, QueryIdCn, UpdateSpecialFi
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CreateUserInput {
-    #[validate(length(min = 2, max = 64))]
+    #[validate(length(min = 1, max = 64))]
     pub name: String,
     pub locale: PackObject<Language>,
     #[validate(url)]
@@ -119,10 +119,10 @@ pub async fn internal_create(
     app: Arc<AppState>,
     input: CreateUserInput,
 ) -> Result<db::User, HTTPError> {
-    let id = xid::new();
+    let uid = xid::new();
     let mut doc = db::User {
-        id,
-        gid: input.gid.map_or(id, |id| id.unwrap()),
+        id: uid,
+        gid: input.gid.map_or(uid, |id| id.unwrap()),
         name: input.name,
         locale: input.locale.unwrap(),
         picture: input.picture.unwrap_or_default(),
@@ -159,29 +159,24 @@ pub async fn internal_create(
                 format!("group {} is not available", doc.gid),
             ));
         }
-        doc.kind = group.kind;
+
+        doc.created_at = unix_ms() as i64;
+        doc.updated_at = doc.created_at;
+    } else {
+        let mut group = db::Group {
+            id: doc.id,
+            uid: doc.id,
+            name: doc.name.clone(),
+            logo: doc.picture.clone(),
+            ..Default::default()
+        };
+        group.save(&app.scylla).await?;
+        doc.cn = group.cn;
+        doc.created_at = group.created_at;
+        doc.updated_at = group.updated_at;
     }
 
     let _ = doc.save(&app.scylla).await?;
-    if doc.id == doc.gid {
-        let mut group = db::Group {
-            id: doc.id,
-            cn: doc.cn.clone(),
-            uid: doc.id,
-            name: doc.name.clone(),
-            ..Default::default()
-        };
-        let res = group.save(&app.scylla).await;
-        if res.is_err() {
-            log::error!(target: "api",
-                action = "create_user",
-                gid = doc.id.to_string(),
-                error = res.err().unwrap().to_string().as_str();
-                "Create group for user {} failed", doc.id.to_string(),
-            );
-        }
-    }
-
     Ok(doc)
 }
 
@@ -199,7 +194,7 @@ pub async fn get(
             return Err(HTTPError::new(400, "id or cn is required".into()));
         }
 
-        let mut index = db::UserIndex::with_pk(input.cn.as_ref().unwrap().to_owned());
+        let mut index = db::GroupIndex::with_pk(input.cn.as_ref().unwrap().to_owned());
         index.get_one(&app.scylla).await?;
         if index.expire_at < unix_ms() as i64 {
             return Err(HTTPError::new(404, format!("user {} not found", index.cn)));

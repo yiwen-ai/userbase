@@ -1,11 +1,11 @@
-CREATE TABLE IF NOT EXISTS user_index (
-    cn         TEXT,   -- user common name, globally unique
-    id         BLOB,   -- user id, 12 bytes XID, https://docs.rs/xid/latest/xid/
-    created_at BIGINT, -- login name created at, unix time, ms
-    expire_at  BIGINT, -- login name expire at, unix time, ms
+CREATE TABLE IF NOT EXISTS group_index (
+    cn         TEXT,   -- group common name, globally unique
+    id         BLOB,   -- group id, 12 bytes XID, https://docs.rs/xid/latest/xid/
+    created_at BIGINT, -- group name created at, unix time, ms
+    expire_at  BIGINT, -- group name expire at, unix time, ms
     PRIMARY KEY (cn)
 ) WITH caching = {'enabled': 'true'}
-    AND comment = 'user index'
+    AND comment = 'group index'
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
@@ -37,18 +37,6 @@ CREATE TABLE IF NOT EXISTS user (
     AND default_time_to_live = 0;
 
 CREATE INDEX user_gid ON user (gid);
-
-CREATE TABLE IF NOT EXISTS group_index (
-    cn         TEXT,   -- group common name, globally unique
-    id         BLOB,   -- group id, 12 bytes XID, https://docs.rs/xid/latest/xid/
-    created_at BIGINT, -- group name created at, unix time, ms
-    expire_at  BIGINT, -- group name expire at, unix time, ms
-    PRIMARY KEY (cn)
-) WITH caching = {'enabled': 'true'}
-    AND comment = 'group index'
-    AND compaction = {'class': 'SizeTieredCompactionStrategy'}
-    AND compression = {'sstable_compression': 'LZ4Compressor'}
-    AND default_time_to_live = 0;
 
 -- https://schema.org/Organization
 CREATE TABLE IF NOT EXISTS group (

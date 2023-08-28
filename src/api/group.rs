@@ -165,6 +165,12 @@ pub async fn get(
     let mut doc = db::Group::with_pk(id);
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
+    if ctx.user > db::MIN_ID {
+        let mut member = db::Member::with_pk(id, ctx.user);
+        let res = member.get_one(&app.scylla, vec!["role".to_string()]).await;
+        doc._role = if res.is_ok() { member.role } else { -2 };
+        doc._fields.push("_role".to_string());
+    }
     Ok(to.with(SuccessResponse::new(GroupOutput::from(doc, &to))))
 }
 

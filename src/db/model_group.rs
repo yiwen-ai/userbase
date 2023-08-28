@@ -351,6 +351,73 @@ impl Group {
         Ok(true)
     }
 
+    pub async fn update_cn(
+        &mut self,
+        db: &scylladb::ScyllaDB,
+        cn: String,
+        updated_at: i64,
+    ) -> anyhow::Result<bool> {
+        if cn != cn.to_lowercase().trim() {
+            return Err(HTTPError::new(400, format!("Invalid cn, {}", cn)).into());
+        }
+
+        self.get_one(
+            db,
+            vec![
+                "cn".to_string(),
+                "uid".to_string(),
+                "updated_at".to_string(),
+            ],
+        )
+        .await?;
+        if self.updated_at != updated_at {
+            return Err(HTTPError::new(
+                409,
+                format!(
+                    "Group {} updated_at conflict, expected updated_at {}, got {}",
+                    self.id, self.updated_at, updated_at
+                ),
+            )
+            .into());
+        }
+
+        if self.cn == cn {
+            return Ok(false); // no need to update
+        }
+
+        let mut doc = GroupIndex::with_pk(cn.clone());
+        doc.get_one(db).await?;
+        if doc.id != self.id {
+            return Err(HTTPError::new(409, format!("Group {} exists", doc.cn)).into());
+        }
+
+        let new_updated_at = unix_ms() as i64;
+        let query = "UPDATE group SET cn=?,updated_at=? WHERE id=? IF updated_at=?";
+        let params = (cn.to_cql(), new_updated_at, self.id.to_cql(), updated_at);
+
+        let res = db.execute(query, params).await?;
+        if !extract_applied(res) {
+            return Err(HTTPError::new(
+                409,
+                format!(
+                    "Group {} update_cn {} failed, please try again",
+                    self.id, cn
+                ),
+            )
+            .into());
+        }
+
+        if self.id == self.uid {
+            let query = "UPDATE user SET cn=?,updated_at=? WHERE id=?";
+            let params = (cn.to_cql(), new_updated_at, self.uid.to_cql());
+            let _ = db.execute(query, params).await?;
+        }
+
+        self.updated_at = new_updated_at;
+        self.cn = cn;
+        Ok(true)
+    }
+
     pub async fn update_status(
         &mut self,
         db: &scylladb::ScyllaDB,
@@ -772,6 +839,53 @@ mod tests {
             assert_eq!(doc3.cn, doc.cn);
             assert_eq!(doc3._fields, vec!["name", "cn", "uid"]);
         }
+
+        // // update_cn
+        // {
+        //     let mut doc = Group::with_pk(uid);
+        //     doc.get_one(db, vec![]).await.unwrap();
+
+        //     let cn = doc.cn.clone() + "jarvis";
+
+        //     let res = doc
+        //         .update_cn(db, "Jarvis".to_string(), doc.updated_at)
+        //         .await;
+        //     assert!(res.is_err());
+        //     let err: erring::HTTPError = res.unwrap_err().into();
+        //     assert_eq!(err.code, 400);
+
+        //     let res = doc.update_cn(db, cn.clone(), doc.updated_at - 1).await;
+        //     assert!(res.is_err());
+        //     let err: erring::HTTPError = res.unwrap_err().into();
+        //     assert_eq!(err.code, 409);
+
+        //     let res = doc
+        //         .update_cn(db, doc.cn.clone(), doc.updated_at)
+        //         .await
+        //         .unwrap();
+        //     assert!(!res);
+
+        //     let res = doc
+        //         .update_cn(db, "jarvis".to_string(), doc.updated_at - 1)
+        //         .await;
+        //     assert!(res.is_err());
+        //     let err: erring::HTTPError = res.unwrap_err().into();
+        //     assert_eq!(err.code, 409);
+
+        //     let res = doc.update_cn(db, cn.clone(), doc.updated_at).await;
+        //     assert!(res.is_err());
+        //     let err: erring::HTTPError = res.unwrap_err().into();
+        //     assert_eq!(err.code, 404);
+
+        //     let mut index = GroupIndex {
+        //         cn: cn.clone(),
+        //         id: uid,
+        //         ..Default::default()
+        //     };
+        //     index.save(db, 1000 * 3600).await.unwrap();
+        //     let res = doc.update_cn(db, cn.clone(), doc.updated_at).await.unwrap();
+        //     assert!(res);
+        // }
 
         // update status
         {

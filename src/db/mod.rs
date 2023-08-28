@@ -14,10 +14,12 @@ pub use model_follow::Follow;
 pub use model_group::{Group, GroupIndex};
 pub use model_member::Member;
 pub use model_session::Session;
-pub use model_user::{User, UserIndex};
+pub use model_user::User;
 
 pub static USER_JARVIS: &str = "0000000000000jarvis0"; // system user
 pub static USER_ANON: &str = "000000000000000anon0"; // anonymous user
+pub static MAX_ID: xid::Id = xid::Id([255; 12]);
+pub static MIN_ID: xid::Id = xid::Id([0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255]);
 
 static BASE_36: &str = "abcdefghijklmnopqrstuvwxyz0123456789";
 

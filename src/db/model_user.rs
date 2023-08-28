@@ -7,149 +7,6 @@ use scylla_orm_macros::CqlOrm;
 
 use crate::db::{scylladb, scylladb::extract_applied, xid_to_cn};
 
-#[derive(Debug, Default, Clone, CqlOrm)]
-pub struct UserIndex {
-    pub cn: String, // should be lowercase
-    pub id: xid::Id,
-    pub created_at: i64,
-    pub expire_at: i64,
-
-    pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
-}
-
-impl UserIndex {
-    pub fn with_pk(cn: String) -> Self {
-        Self {
-            cn,
-            ..Default::default()
-        }
-    }
-
-    pub async fn get_one(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<()> {
-        self._fields = Self::fields();
-
-        let query = "SELECT id,created_at,expire_at FROM user_index WHERE cn=? LIMIT 1";
-        let params = (&self.cn.to_lowercase(),);
-        let res = db.execute(query, params).await?.single_row()?;
-
-        let mut cols = ColumnsMap::with_capacity(2);
-        cols.fill(
-            res,
-            &vec![
-                "id".to_string(),
-                "created_at".to_string(),
-                "expire_at".to_string(),
-            ],
-        )?;
-        self.fill(&cols);
-
-        Ok(())
-    }
-
-    async fn save(&mut self, db: &scylladb::ScyllaDB, expire_ms: i64) -> anyhow::Result<bool> {
-        self._fields = Self::fields();
-        let now = unix_ms() as i64;
-        self.created_at = now;
-        self.expire_at = now + expire_ms;
-        let query =
-            "INSERT INTO user_index (cn,id,created_at,expire_at) VALUES (?,?,?,?) IF NOT EXISTS";
-        let params = (
-            &self.cn.to_lowercase(),
-            self.id.to_cql(),
-            self.created_at,
-            self.expire_at,
-        );
-        let res = db.execute(query, params).await?;
-        if !extract_applied(res) {
-            return Err(HTTPError::new(409, format!("{} already exists", self.cn)).into());
-        }
-
-        Ok(true)
-    }
-
-    async fn update_expire(
-        &mut self,
-        db: &scylladb::ScyllaDB,
-        expire_at: i64,
-    ) -> anyhow::Result<bool> {
-        let now = unix_ms() as i64;
-        if expire_at < now {
-            return Err(HTTPError::new(
-                400,
-                format!("Invalid expire_at, expected >= {}, got {}", now, expire_at),
-            )
-            .into());
-        }
-
-        self.get_one(db).await?;
-        if self.expire_at == expire_at {
-            return Ok(false); // no need to update
-        }
-
-        let query = "UPDATE user_index SET expire_at=? WHERE cn=? IF EXISTS";
-        let params = (expire_at, &self.cn.to_lowercase());
-
-        let res = db.execute(query, params).await?;
-        if !extract_applied(res) {
-            return Err(HTTPError::new(
-                409,
-                format!(
-                    "Update user_index {} expire_at failed, please try again",
-                    self.cn
-                ),
-            )
-            .into());
-        }
-
-        self.expire_at = expire_at;
-        Ok(true)
-    }
-
-    async fn reset_cn(
-        &mut self,
-        db: &scylladb::ScyllaDB,
-        id: xid::Id,
-        expire_at: i64,
-    ) -> anyhow::Result<bool> {
-        self.get_one(db).await?;
-        if self.id == id {
-            return Ok(false); // no need to update
-        }
-
-        let now = unix_ms() as i64;
-        // 过期一年才能被重置
-        if self.expire_at == 0 || self.expire_at + 1000 * 3600 * 24 * 365 > now {
-            return Err(HTTPError::new(
-                409,
-                format!(
-                    "User common name {} is bundling to {}, can't reset to {}",
-                    self.cn, self.id, id
-                ),
-            )
-            .into());
-        }
-
-        self.expire_at = now + expire_at;
-        let query = "UPDATE user_index SET id=?,expire_at=? WHERE cn=? IF EXISTS";
-        let params = (id.to_cql(), self.expire_at, &self.cn.to_lowercase());
-
-        let res = db.execute(query, params).await?;
-        if !extract_applied(res) {
-            return Err(HTTPError::new(
-                409,
-                format!(
-                    "reset user {} with id {} failed, please try again",
-                    self.cn, id
-                ),
-            )
-            .into());
-        }
-
-        self.id = id;
-        Ok(true)
-    }
-}
-
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct User {
     pub id: xid::Id,
@@ -323,24 +180,8 @@ impl User {
             return Err(HTTPError::new(409, format!("User {}, {} exists", doc.id, doc.cn)).into());
         }
 
-        let mut i: u8 = 0;
-        let expire: i64 = 1000 * 3600 * 24 * 365 * 99; // default CN expire 99 years
-        loop {
-            self.cn = xid_to_cn(&self.id, i);
-
-            let mut index = UserIndex::with_pk(self.cn.clone());
-            index.id = self.id;
-            let res = index.save(db, expire).await;
-            if res.is_ok() {
-                self.created_at = index.created_at;
-                self.updated_at = index.created_at;
-                break;
-            }
-
-            i += 1;
-            if i == u8::MAX {
-                return Err(HTTPError::new(500, "Failed to save user".to_string()).into());
-            }
+        if self.cn.is_empty() {
+            self.cn = xid_to_cn(&self.id, 0);
         }
 
         let fields = Self::fields();
@@ -375,57 +216,6 @@ impl User {
             .into());
         }
 
-        Ok(true)
-    }
-
-    pub async fn update_cn(
-        &mut self,
-        db: &scylladb::ScyllaDB,
-        cn: String,
-        updated_at: i64,
-    ) -> anyhow::Result<bool> {
-        if cn != cn.to_lowercase().trim() {
-            return Err(HTTPError::new(400, format!("Invalid cn, {}", cn)).into());
-        }
-
-        self.get_one(db, vec!["cn".to_string(), "updated_at".to_string()])
-            .await?;
-        if self.updated_at != updated_at {
-            return Err(HTTPError::new(
-                409,
-                format!(
-                    "User {} updated_at conflict, expected updated_at {}, got {}",
-                    self.id, self.updated_at, updated_at
-                ),
-            )
-            .into());
-        }
-
-        if self.cn == cn {
-            return Ok(false); // no need to update
-        }
-
-        let mut doc = UserIndex::with_pk(cn.clone());
-        doc.get_one(db).await?;
-        if doc.id != self.id {
-            return Err(HTTPError::new(409, format!("User {} exists", doc.cn)).into());
-        }
-
-        let new_updated_at = unix_ms() as i64;
-        let query = "UPDATE user SET cn=?,updated_at=? WHERE id=? IF updated_at=?";
-        let params = (cn.to_cql(), new_updated_at, self.id.to_cql(), updated_at);
-
-        let res = db.execute(query, params).await?;
-        if !extract_applied(res) {
-            return Err(HTTPError::new(
-                409,
-                format!("User {} update_cn {} failed, please try again", self.id, cn),
-            )
-            .into());
-        }
-
-        self.updated_at = new_updated_at;
-        self.cn = cn;
         Ok(true)
     }
 
@@ -861,81 +651,9 @@ mod tests {
     #[ignore]
     async fn test_all() {
         // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
-        user_index_model_works().await;
         user_model_works().await;
         list_group_users_works().await;
         batch_get_users_works().await;
-    }
-
-    // #[tokio::test(flavor = "current_thread")]
-    async fn user_index_model_works() {
-        let db = get_db().await;
-
-        let id = xid::new();
-        let mut c1 = UserIndex {
-            cn: xid_to_cn(&id, 0),
-            id,
-            ..Default::default()
-        };
-        c1.save(db, 1000 * 3600).await.unwrap();
-
-        let id = xid::new();
-        let mut c2 = UserIndex {
-            cn: xid_to_cn(&id, 0),
-            id,
-            ..Default::default()
-        };
-        c2.save(db, 1000 * 3600).await.unwrap();
-
-        let id = xid::new();
-        let mut c3 = UserIndex {
-            cn: xid_to_cn(&id, 0),
-            id,
-            ..Default::default()
-        };
-        c3.save(db, 1000 * 3600).await.unwrap();
-
-        let mut d1 = UserIndex::with_pk(c1.cn);
-        d1.get_one(db).await.unwrap();
-        assert_eq!(d1.id, c1.id);
-        assert_eq!(d1.created_at + 1000 * 3600, d1.expire_at);
-
-        let mut d2 = UserIndex::with_pk(c2.cn);
-        d2.get_one(db).await.unwrap();
-        assert_eq!(d2.id, c2.id);
-        assert_eq!(d2.created_at + 1000 * 3600, d2.expire_at);
-
-        let mut d3 = UserIndex::with_pk(c3.cn);
-        let res = d3.update_expire(db, c3.created_at - 1).await;
-        assert!(res.is_err());
-        let err: erring::HTTPError = res.unwrap_err().into();
-        assert_eq!(err.code, 400);
-
-        let res = d3.update_expire(db, c3.expire_at).await.unwrap();
-        assert!(!res);
-
-        let res = d3.update_expire(db, c3.expire_at + 3600).await.unwrap();
-        assert!(res);
-
-        d3.get_one(db).await.unwrap();
-        assert_eq!(d3.id, c3.id);
-        assert_eq!(d3.expire_at, c3.expire_at + 3600);
-
-        let new_user = xid::new();
-        let res = d3.reset_cn(db, new_user, 1).await;
-        assert!(res.is_err());
-        let err: erring::HTTPError = res.unwrap_err().into();
-        assert_eq!(err.code, 409);
-
-        let query = "UPDATE user_index SET expire_at=? WHERE cn=? IF EXISTS";
-        let params = (unix_ms() as i64 - 1000 * 3600 * 24 * 365 - 1, &d3.cn);
-        db.execute(query, params).await.unwrap();
-
-        let res = d3.reset_cn(db, new_user, 1).await.unwrap();
-        assert!(res);
-
-        let res = d3.reset_cn(db, new_user, 1).await.unwrap();
-        assert!(!res);
     }
 
     // #[tokio::test(flavor = "current_thread")]
@@ -1053,53 +771,6 @@ mod tests {
             assert_eq!(doc3.id, doc.gid);
             assert_eq!(doc3.cn, doc.cn);
             assert_eq!(doc3._fields, vec!["name", "cn", "gid"]);
-        }
-
-        // update_cn
-        {
-            let mut doc = User::with_pk(uid);
-            doc.get_one(db, vec![]).await.unwrap();
-
-            let cn = doc.cn.clone() + "jarvis";
-
-            let res = doc
-                .update_cn(db, "Jarvis".to_string(), doc.updated_at)
-                .await;
-            assert!(res.is_err());
-            let err: erring::HTTPError = res.unwrap_err().into();
-            assert_eq!(err.code, 400);
-
-            let res = doc.update_cn(db, cn.clone(), doc.updated_at - 1).await;
-            assert!(res.is_err());
-            let err: erring::HTTPError = res.unwrap_err().into();
-            assert_eq!(err.code, 409);
-
-            let res = doc
-                .update_cn(db, doc.cn.clone(), doc.updated_at)
-                .await
-                .unwrap();
-            assert!(!res);
-
-            let res = doc
-                .update_cn(db, "jarvis".to_string(), doc.updated_at - 1)
-                .await;
-            assert!(res.is_err());
-            let err: erring::HTTPError = res.unwrap_err().into();
-            assert_eq!(err.code, 409);
-
-            let res = doc.update_cn(db, cn.clone(), doc.updated_at).await;
-            assert!(res.is_err());
-            let err: erring::HTTPError = res.unwrap_err().into();
-            assert_eq!(err.code, 404);
-
-            let mut index = UserIndex {
-                cn: cn.clone(),
-                id: uid,
-                ..Default::default()
-            };
-            index.save(db, 1000 * 3600).await.unwrap();
-            let res = doc.update_cn(db, cn.clone(), doc.updated_at).await.unwrap();
-            assert!(res);
         }
 
         // update status
