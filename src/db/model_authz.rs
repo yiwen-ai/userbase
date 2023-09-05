@@ -131,7 +131,7 @@ impl AuthZ {
         cols: ColumnsMap,
         uid: xid::Id,
     ) -> anyhow::Result<bool> {
-        let valid_fields = vec!["expire_at", "scope", "ip"];
+        let valid_fields = ["expire_at", "scope", "ip"];
         let update_fields = cols.keys();
         for field in &update_fields {
             if !valid_fields.contains(&field.as_str()) {

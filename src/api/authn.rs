@@ -149,7 +149,7 @@ pub async fn login_or_new(
         uid: to.with(doc.uid),
         sub: to.with(sub),
         session: sess,
-        picture: picture,
+        picture,
         user_created_at,
     })))
 }

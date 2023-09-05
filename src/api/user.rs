@@ -218,7 +218,6 @@ pub async fn get(
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateUserInput {
     pub id: PackObject<xid::Id>,
-    pub updated_at: i64,
     #[validate(length(min = 2, max = 64))]
     pub name: Option<String>,
     pub birthdate: Option<String>,
@@ -279,7 +278,6 @@ pub async fn update(
 
     let id = *input.id.to_owned();
     let mut doc = db::User::with_pk(id);
-    let updated_at = input.updated_at;
     let cols = input.into()?;
     ctx.set_kvs(vec![
         ("action", "update_user".into()),
@@ -287,7 +285,7 @@ pub async fn update(
     ])
     .await;
 
-    let ok = doc.update(&app.scylla, cols, updated_at).await?;
+    let ok = doc.update(&app.scylla, cols).await?;
     ctx.set("updated", ok.into()).await;
 
     doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.

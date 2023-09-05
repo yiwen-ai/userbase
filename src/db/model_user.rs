@@ -455,9 +455,8 @@ impl User {
         &mut self,
         db: &scylladb::ScyllaDB,
         cols: ColumnsMap,
-        updated_at: i64,
     ) -> anyhow::Result<bool> {
-        let valid_fields = vec![
+        let valid_fields = [
             "name",
             "birthdate",
             "locale",
@@ -473,18 +472,7 @@ impl User {
             }
         }
 
-        self.get_one(db, vec!["status".to_string(), "updated_at".to_string()])
-            .await?;
-        if self.updated_at != updated_at {
-            return Err(HTTPError::new(
-                409,
-                format!(
-                    "User updated_at conflict, expected updated_at {}, got {}",
-                    self.updated_at, updated_at
-                ),
-            )
-            .into());
-        }
+        self.get_one(db, vec!["status".to_string()]).await?;
         if self.status < 0 {
             return Err(HTTPError::new(
                 409,
@@ -506,11 +494,10 @@ impl User {
         }
 
         let query = format!(
-            "UPDATE user SET {} WHERE id=? IF updated_at=?",
+            "UPDATE user SET {} WHERE id=? IF EXISTS",
             set_fields.join(",")
         );
         params.push(self.id.to_cql());
-        params.push(updated_at.to_cql());
 
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
@@ -905,21 +892,14 @@ mod tests {
             let mut doc = User::with_pk(uid);
             let mut cols = ColumnsMap::new();
             cols.set_as("status", &2i8);
-            let res = doc.update(db, cols, 0).await;
+            let res = doc.update(db, cols).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 400); // status is not updatable
 
             let mut cols = ColumnsMap::new();
             cols.set_as("name", &"Jarvis 1".to_string());
-            let res = doc.update(db, cols, 1).await;
-            assert!(res.is_err());
-            let err: erring::HTTPError = res.unwrap_err().into();
-            assert_eq!(err.code, 409); // updated_at not match
-
-            let mut cols = ColumnsMap::new();
-            cols.set_as("name", &"Jarvis 1".to_string());
-            let res = doc.update(db, cols, doc.updated_at).await.unwrap();
+            let res = doc.update(db, cols).await.unwrap();
             assert!(res);
 
             let mut cols = ColumnsMap::new();
@@ -951,7 +931,7 @@ mod tests {
             )
             .unwrap();
             cols.set_as("bio", &bio);
-            let res = doc.update(db, cols, doc.updated_at).await.unwrap();
+            let res = doc.update(db, cols).await.unwrap();
             assert!(res);
 
             doc.get_one(db, vec![]).await.unwrap();

@@ -181,7 +181,6 @@ pub async fn get(
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateGroupInput {
     pub id: PackObject<xid::Id>,
-    pub updated_at: i64,
     #[validate(length(min = 2, max = 64))]
     pub name: Option<String>,
     #[validate(length(min = 0, max = 6))]
@@ -244,7 +243,6 @@ pub async fn update(
 
     let id = *input.id.to_owned();
     let mut doc = db::Group::with_pk(id);
-    let updated_at = input.updated_at;
     let cols = input.into()?;
     ctx.set_kvs(vec![
         ("action", "update_group".into()),
@@ -252,7 +250,7 @@ pub async fn update(
     ])
     .await;
 
-    let ok = doc.update(&app.scylla, cols, updated_at).await?;
+    let ok = doc.update(&app.scylla, cols).await?;
     ctx.set("updated", ok.into()).await;
 
     doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
