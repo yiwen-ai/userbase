@@ -38,6 +38,7 @@ pub struct AuthNLoginOutput {
     pub uid: PackObject<xid::Id>,
     pub sub: PackObject<uuid::Uuid>,
     pub session: String,
+    pub picture: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_created_at: Option<i64>,
 }
@@ -59,6 +60,7 @@ pub async fn login_or_new(
     ])
     .await;
 
+    let mut picture: String = "".to_string();
     let mut user_created_at: Option<i64> = None;
     let mut doc = db::AuthN::with_pk(input.idp.clone(), input.aud.clone(), input.sub.clone());
     match doc.get_one(&app.scylla, vec!["uid".to_string()]).await {
@@ -71,6 +73,7 @@ pub async fn login_or_new(
                     "status".to_string(),
                     "rating".to_string(),
                     "kind".to_string(),
+                    "picture".to_string(),
                 ],
             )
             .await
@@ -81,6 +84,7 @@ pub async fn login_or_new(
                     format!("{} user, id {}", user.status_name(), user.id),
                 ));
             }
+            picture = user.picture;
 
             let mut cols = ColumnsMap::new();
             cols.set_as("expire_at", &expire_at);
@@ -145,6 +149,7 @@ pub async fn login_or_new(
         uid: to.with(doc.uid),
         sub: to.with(sub),
         session: sess,
+        picture: picture,
         user_created_at,
     })))
 }
