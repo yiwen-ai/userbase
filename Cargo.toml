@@ -1,6 +1,6 @@
 [package]
 name = "userbase"
-version = "0.6.3"
+version = "0.6.4"
 edition = "2021"
 rust-version = "1.64"
 description = ""
@@ -110,6 +110,7 @@ base-x = "0.2"
 chrono = { version = "0.4" }
 cookie = { version = "0.17", features = ["percent-encode"] }
 ulid = "1"
+dotenvy = "0.15"
 
 [dev-dependencies]
 faster-hex = "0.8"

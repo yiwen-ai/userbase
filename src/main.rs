@@ -1,3 +1,4 @@
+use dotenvy::dotenv;
 use std::{net::SocketAddr, sync::Arc};
 use structured_logger::{async_json::new_writer, Builder};
 use tokio::{io, signal};
@@ -10,6 +11,7 @@ mod router;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> anyhow::Result<()> {
+    dotenv().expect(".env file not found");
     let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
 
     Builder::with_level(cfg.log.level.as_str())
