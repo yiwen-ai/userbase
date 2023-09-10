@@ -165,8 +165,9 @@ pub struct Group {
     pub website: String,
     pub description: Vec<u8>,
 
-    pub _role: i8,            // user' role in this group
-    pub _priority: i8,        // priority that user marked on the group
+    pub _role: i8,     // user' role in this group
+    pub _priority: i8, // priority that user marked on the group
+    pub _following: bool,
     pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
 }
 

@@ -62,6 +62,8 @@ pub struct GroupOutput {
     pub _role: Option<i8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub _priority: Option<i8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub _following: Option<bool>,
 }
 
 impl GroupOutput {
@@ -90,6 +92,7 @@ impl GroupOutput {
                 "description" => rt.description = Some(to.with(val.description.to_owned())),
                 "_role" => rt._role = Some(val._role),
                 "_priority" => rt._priority = Some(val._priority),
+                "_following" => rt._following = Some(val._following),
                 _ => {}
             }
         }
@@ -174,6 +177,10 @@ pub async fn get(
             doc._role = if res.is_ok() { member.role } else { -2 };
         }
         doc._fields.push("_role".to_string());
+
+        let mut follow = db::Follow::with_pk(ctx.user, id);
+        doc._following = follow.get_one(&app.scylla, vec![]).await.is_ok();
+        doc._fields.push("_following".to_string());
     }
     Ok(to.with(SuccessResponse::new(GroupOutput::from(doc, &to))))
 }
