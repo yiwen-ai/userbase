@@ -228,7 +228,7 @@ impl AuthZ {
         let fields = Self::select_fields(select_fields, true)?;
 
         let query = format!(
-            "SELECT {} FROM authz WHERE uid=? LIMIT 1000 BYPASS CACHE USING TIMEOUT 3s",
+            "SELECT {} FROM authz WHERE uid=? LIMIT 1000 USING TIMEOUT 3s",
             fields.clone().join(",")
         );
         let params = (uid.to_cql(),);

@@ -624,7 +624,7 @@ impl Group {
         let fields = Self::select_fields(select_fields, false)?;
 
         let query = format!(
-            "SELECT {} FROM group WHERE id IN ({}) BYPASS CACHE USING TIMEOUT 3s",
+            "SELECT {} FROM group WHERE id IN ({}) USING TIMEOUT 3s",
             fields.clone().join(","),
             ids.iter().map(|_| "?").collect::<Vec<&str>>().join(",")
         );

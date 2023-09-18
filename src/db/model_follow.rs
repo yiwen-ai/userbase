@@ -117,7 +117,7 @@ impl Follow {
     }
 
     pub async fn all_gids(db: &scylladb::ScyllaDB, uid: xid::Id) -> anyhow::Result<Vec<xid::Id>> {
-        let query = "SELECT gid FROM follow WHERE uid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s";
+        let query = "SELECT gid FROM follow WHERE uid=? LIMIT ? USING TIMEOUT 3s";
         let params = (uid.to_cql(), 1000i32);
         let rows = db.execute_iter(query, params).await?;
 
@@ -143,7 +143,7 @@ impl Follow {
     ) -> anyhow::Result<Vec<Group>> {
         let follow_fields = Self::fields();
         let query = format!(
-            "SELECT {} FROM follow WHERE uid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+            "SELECT {} FROM follow WHERE uid=? LIMIT ? USING TIMEOUT 3s",
             follow_fields.clone().join(",")
         );
         let params = (uid.to_cql(), 1000i32);

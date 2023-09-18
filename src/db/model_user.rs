@@ -526,14 +526,14 @@ impl User {
 
         let rows = if status.is_none() {
             let query = format!(
-                "SELECT {} FROM user WHERE gid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                "SELECT {} FROM user WHERE gid=? LIMIT ? USING TIMEOUT 3s",
                 id_fields.clone().join(",")
             );
             let params = (gid.to_cql(), 1000i32);
             db.execute_iter(query, params).await?
         } else {
             let query = format!(
-                "SELECT {} FROM user WHERE gid=? AND status=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s", id_fields.clone().join(","));
+                "SELECT {} FROM user WHERE gid=? AND status=? LIMIT ? ALLOW FILTERING USING TIMEOUT 3s", id_fields.clone().join(","));
             let params = (gid.to_cql(), status.unwrap(), 1000i32);
             db.execute_iter(query, params).await?
         };
@@ -587,7 +587,7 @@ impl User {
         let fields = Self::select_fields(select_fields, false)?;
 
         let query = format!(
-            "SELECT {} FROM user WHERE id IN ({}) BYPASS CACHE USING TIMEOUT 3s",
+            "SELECT {} FROM user WHERE id IN ({}) USING TIMEOUT 3s",
             fields.clone().join(","),
             ids.iter().map(|_| "?").collect::<Vec<&str>>().join(",")
         );

@@ -285,27 +285,28 @@ impl Member {
         let rows = if let Some(uid) = page_token {
             if role.is_none() {
                 let query = format!(
-                "SELECT {} FROM member WHERE gid=? AND uid>? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(","));
+                    "SELECT {} FROM member WHERE gid=? AND uid>? LIMIT ? USING TIMEOUT 3s",
+                    fields.clone().join(",")
+                );
                 let params = (gid.to_cql(), uid.to_cql(), page_size as i32);
                 db.execute_iter(query, params).await?
             } else {
                 let query = format!(
-                    "SELECT {} FROM member WHERE gid=? AND uid>? AND role=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                    "SELECT {} FROM member WHERE gid=? AND uid>? AND role=? LIMIT ? USING TIMEOUT 3s",
                     fields.clone().join(","));
                 let params = (gid.to_cql(), uid.to_cql(), role.unwrap(), page_size as i32);
                 db.execute_iter(query, params).await?
             }
         } else if role.is_none() {
             let query = format!(
-                "SELECT {} FROM member WHERE gid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                "SELECT {} FROM member WHERE gid=? LIMIT ? USING TIMEOUT 3s",
                 fields.clone().join(",")
             );
             let params = (gid.to_cql(), page_size as i32);
             db.execute_iter(query, params).await?
         } else {
             let query = format!(
-                "SELECT {} FROM member WHERE gid=? AND role=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                "SELECT {} FROM member WHERE gid=? AND role=? LIMIT ? USING TIMEOUT 3s",
                 fields.clone().join(",")
             );
             let params = (gid.as_bytes(), role.unwrap(), page_size as i32);
@@ -341,14 +342,14 @@ impl Member {
         ];
         let rows = if priority.is_none() {
             let query = format!(
-                "SELECT {} FROM member WHERE uid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                "SELECT {} FROM member WHERE uid=? LIMIT ? USING TIMEOUT 3s",
                 member_fields.clone().join(",")
             );
             let params = (uid.to_cql(), 1000i32);
             db.execute_iter(query, params).await?
         } else {
             let query = format!(
-                    "SELECT {} FROM member WHERE uid=? AND priority=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
+                    "SELECT {} FROM member WHERE uid=? AND priority=? LIMIT ? ALLOW FILTERING USING TIMEOUT 3s",
                     member_fields.clone().join(","));
             let params = (uid.to_cql(), priority.unwrap(), 1000i32);
             db.execute_iter(query, params).await?
