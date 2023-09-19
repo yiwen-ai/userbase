@@ -53,7 +53,7 @@ pub async fn login_or_new(
 
     let expire_at: i64 = unix_ms() as i64 + input.expires_in as i64;
     ctx.set_kvs(vec![
-        ("action", "login_or_new".into()),
+        ("action", "login".into()),
         ("idp", input.idp.clone().into()),
         ("aud", input.aud.clone().into()),
         ("sub", input.sub.clone().into()),
@@ -66,6 +66,7 @@ pub async fn login_or_new(
     match doc.get_one(&app.scylla, vec!["uid".to_string()]).await {
         Ok(_) => {
             // check user and update
+            ctx.set("uid", doc.uid.to_string().into()).await;
             let mut user = db::User::with_pk(doc.uid);
             user.get_one(
                 &app.scylla,
@@ -102,6 +103,7 @@ pub async fn login_or_new(
             doc.ip = input.ip.clone();
             doc.payload = input.payload.unwrap();
             doc.save(&app.scylla).await?;
+            ctx.set("action", "create_user".into()).await;
         }
     };
 
