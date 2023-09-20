@@ -30,6 +30,7 @@ pub struct AuthNInput {
     pub device_id: String,
     pub device_desc: String,
     pub user: api::user::CreateUserInput,
+    pub co_authn: Option<AuthNPKInput>, // if user exists in co_authn, then use it
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -60,11 +61,41 @@ pub async fn login_or_new(
     ])
     .await;
 
+    let mut some_uid: Option<xid::Id> = None;
+    if let Some(co) = input.co_authn {
+        let mut doc = db::AuthN::with_pk(co.idp.clone(), co.aud.clone(), co.sub.clone());
+        if doc
+            .get_one(&app.scylla, vec!["uid".to_string()])
+            .await
+            .is_ok()
+        {
+            some_uid = Some(doc.uid);
+            ctx.set_kvs(vec![
+                ("co_idp", co.idp.into()),
+                ("co_aud", co.aud.into()),
+                ("co_sub", co.sub.into()),
+                ("co_uid", doc.uid.to_string().into()),
+            ])
+            .await;
+        }
+    }
+
     let mut picture: String = "".to_string();
     let mut user_created_at: Option<i64> = None;
     let mut doc = db::AuthN::with_pk(input.idp.clone(), input.aud.clone(), input.sub.clone());
     match doc.get_one(&app.scylla, vec!["uid".to_string()]).await {
         Ok(_) => {
+            if some_uid.is_some() && doc.uid != some_uid.unwrap() {
+                return Err(HTTPError::new(
+                    401,
+                    format!(
+                        "Invalid authn, uid not match, expected {}, got {}",
+                        some_uid.unwrap(),
+                        doc.uid
+                    ),
+                ));
+            }
+
             // check user and update
             ctx.set("uid", doc.uid.to_string().into()).await;
             let mut user = db::User::with_pk(doc.uid);
@@ -95,15 +126,39 @@ pub async fn login_or_new(
             let _ = doc.update(&app.scylla, cols, doc.uid).await;
         }
         Err(_) => {
-            let user = api::user::internal_create(app.clone(), input.user).await?;
-            user_created_at = Some(user.created_at);
-            doc.uid = user.id;
+            if some_uid.is_some() {
+                let mut user = db::User::with_pk(some_uid.unwrap());
+                user.get_one(
+                    &app.scylla,
+                    vec![
+                        "status".to_string(),
+                        "rating".to_string(),
+                        "kind".to_string(),
+                        "picture".to_string(),
+                    ],
+                )
+                .await
+                .map_err(|e| HTTPError::new(404, format!("Invalid user, {}", e)))?;
+                if user.status < -1 {
+                    return Err(HTTPError::new(
+                        403,
+                        format!("{} user, id {}", user.status_name(), user.id),
+                    ));
+                }
+                picture = user.picture;
+                doc.uid = user.id;
+            } else {
+                let user = api::user::internal_create(app.clone(), input.user).await?;
+                ctx.set("action", "create_user".into()).await;
+                user_created_at = Some(user.created_at);
+                doc.uid = user.id;
+            }
+
             doc.expire_at = expire_at;
             doc.scope = input.scope;
             doc.ip = input.ip.clone();
             doc.payload = input.payload.unwrap();
             doc.save(&app.scylla).await?;
-            ctx.set("action", "create_user".into()).await;
         }
     };
 
