@@ -149,7 +149,12 @@ pub async fn login_or_new(
                 doc.uid = user.id;
             } else {
                 let user = api::user::internal_create(app.clone(), input.user).await?;
-                ctx.set("action", "create_user".into()).await;
+                ctx.set_kvs(vec![
+                    ("action", "create_user".into()),
+                    ("uid", user.id.to_string().into()),
+                    ("name", user.name.into()),
+                ])
+                .await;
                 user_created_at = Some(user.created_at);
                 doc.uid = user.id;
             }
