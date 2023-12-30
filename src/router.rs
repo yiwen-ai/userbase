@@ -3,11 +3,12 @@ use axum::{
     response::{IntoResponse, Response},
     routing, Router,
 };
-use std::{fs, sync::Arc};
-use tower::ServiceBuilder;
+use std::{fs, sync::Arc, time::Duration};
 use tower_http::{
     catch_panic::CatchPanicLayer,
     compression::{predicate::SizeAbove, CompressionLayer},
+    // cors::CorsLayer,
+    timeout::TimeoutLayer,
 };
 
 use axum_web::context;
@@ -25,11 +26,6 @@ pub async fn todo() -> Response {
 
 pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)> {
     let app_state = Arc::new(new_app_state(cfg).await?);
-
-    let mds = ServiceBuilder::new()
-        .layer(CatchPanicLayer::new())
-        .layer(middleware::from_fn(context::middleware))
-        .layer(CompressionLayer::new().compress_when(SizeAbove::new(encoding::MIN_ENCODING_SIZE)));
 
     let app = Router::new()
         .route("/", routing::get(api::version))
@@ -61,6 +57,19 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 )
                 .route("/login_or_new", routing::post(api::authn::login_or_new))
                 .route("/list", routing::get(api::authn::list)),
+        )
+        .nest(
+            "/v1/passkey",
+            Router::new()
+                .route("/get_challenge", routing::get(api::passkey::get_challenge))
+                .route(
+                    "/verify_registration",
+                    routing::post(api::passkey::verify_registration),
+                )
+                .route(
+                    "/verify_authentication",
+                    routing::post(api::passkey::verify_authentication),
+                ),
         )
         .nest(
             "/v1/oauth",
@@ -133,7 +142,13 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                     routing::patch(api::group::update_kind),
                 ),
         )
-        .route_layer(mds)
+        .layer((
+            CatchPanicLayer::new(),
+            TimeoutLayer::new(Duration::from_secs(10)),
+            // CorsLayer::very_permissive(),
+            middleware::from_fn(context::middleware),
+            CompressionLayer::new().compress_when(SizeAbove::new(encoding::MIN_ENCODING_SIZE)),
+        ))
         .with_state(app_state.clone());
 
     Ok((app_state, app))
@@ -153,9 +168,10 @@ async fn new_app_state(cfg: conf::Conf) -> anyhow::Result<api::AppState> {
         crypto::Encrypt0::new(kek.get_private()?, b"")
     };
 
-    let mac_id = {
+    let (mac_id, mac_state) = {
         let id_key = read_key(&decryptor, aad, &fs::read_to_string(cfg.keys.id_key_file)?)?;
-        crypto::MacId::new(id_key.get_private()?)
+        let secret = id_key.get_private()?;
+        (crypto::MacId::new(secret), crypto::MacState::new(secret))
     };
 
     let session = {
@@ -181,19 +197,14 @@ async fn new_app_state(cfg: conf::Conf) -> anyhow::Result<api::AppState> {
         )
     };
 
-    let scylla = {
-        let keyspace = if cfg.env == "test" {
-            "userbase_test"
-        } else {
-            "userbase"
-        };
-        db::scylladb::ScyllaDB::new(cfg.scylla, keyspace).await?
-    };
+    let scylla = { db::scylladb::ScyllaDB::new(cfg.scylla).await? };
 
     Ok(api::AppState {
         start_at: context::unix_ms(),
         session_name_prefix: cfg.session_name_prefix,
+        passkey: cfg.passkey,
         mac_id: Arc::new(mac_id),
+        mac_state: Arc::new(mac_state),
         session: Arc::new(session),
         cwt: Arc::new(cwt),
         scylla: Arc::new(scylla),

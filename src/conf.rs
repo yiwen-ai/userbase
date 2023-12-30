@@ -15,10 +15,17 @@ pub struct Server {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct Passkey {
+    pub rp_id: String,
+    pub rp_name: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct ScyllaDB {
     pub nodes: Vec<String>,
     pub username: String,
     pub password: String,
+    pub keyspace: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -39,6 +46,7 @@ pub struct Conf {
     pub server: Server,
     pub scylla: ScyllaDB,
     pub keys: Keys,
+    pub passkey: Passkey,
 }
 
 impl Conf {

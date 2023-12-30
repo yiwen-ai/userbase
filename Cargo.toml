@@ -1,6 +1,6 @@
 [package]
 name = "userbase"
-version = "1.0.3"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.64"
 description = ""
@@ -15,8 +15,7 @@ members = ["crates/*"]
 [workspace.dependencies]
 anyhow = "1"
 async-trait = "0.1"
-axum = { version = "0.6", features = [
-  "headers",
+axum = { version = "0.7", features = [
   "http1",
   "http2",
   "json",
@@ -29,7 +28,7 @@ bytes = "1"
 base64 = "0.21"
 ciborium = "0.2"
 ciborium-io = "0.2"
-isolang = { git = "https://github.com/yiwen-ai/isolang-rs.git", branch = "master", features = [
+isolang = { version = "2.4", features = [
   "english_names",
   "lowercase_names",
   "local_names",
@@ -38,7 +37,7 @@ isolang = { git = "https://github.com/yiwen-ai/isolang-rs.git", branch = "master
 libflate = "1"
 log = "0.4"
 mime = "0.3"
-scylla = "0.9"
+scylla = "0.11"
 serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
 structured-logger = "1"
@@ -59,7 +58,7 @@ tokio = { version = "1", features = [
 uuid = { version = "1", features = ["fast-rng", "v4", "v8"] }
 validator = { version = "0.16", features = ["derive", "phone"] }
 xid = { git = "https://github.com/yiwen-ai/xid-rs.git", tag = "v1.1.0" }
-zstd = "0.12"
+zstd = "0.13"
 
 [dependencies]
 axum-web = { path = "crates/axum-web" }
@@ -83,34 +82,43 @@ serde_json = { workspace = true }
 structured-logger = { workspace = true }
 tokio = { workspace = true }
 tower = "0.4"
-tower-http = { version = "0.4", features = [
+tower-http = { version = "0.5", features = [
   "catch-panic",
   "compression-gzip",
   "compression-zstd",
   "decompression-gzip",
   "decompression-zstd",
   "propagate-header",
+  "cors",
+  "timeout",
 ] }
 uuid = { workspace = true }
 validator = { workspace = true }
 xid = { workspace = true }
 zstd = { workspace = true }
 futures = "0.3"
-hyper = "0.14"
+hyper = "1.1"
 hmac = "0.12"
+sha2 = "0.10"
 sha3 = "0.10"
 base64ct = { version = "1", features = ["alloc"] }
 aes-kw = { version = "0.2", features = ["alloc"] }
 subtle = "2"
-coset = { git = "https://github.com/yiwen-ai/coset.git", branch = "yiwen" }
+coset = { version = "0.3" }
 ed25519-dalek = "2"
+p256 = "0.13"
+rsa = { version = "0.9", features = ["sha2"] }
 rand_core = { version = "0.6", features = ["getrandom", "alloc"] }
 aes-gcm = "0.10"
 base-x = "0.2"
 chrono = { version = "0.4" }
-cookie = { version = "0.17", features = ["percent-encode"] }
+cookie = { version = "0.18", features = ["percent-encode"] }
 ulid = "1"
 dotenvy = "0.15"
+passkey-types = "0.2"
+public-suffix = "0.1"
+headers = "0.4"
+url = "2"
 
 [dev-dependencies]
 faster-hex = "0.8"

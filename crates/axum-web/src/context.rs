@@ -1,4 +1,5 @@
 use axum::{
+    body::Body,
     http::{header, HeaderMap, Request},
     middleware::Next,
     response::Response,
@@ -44,7 +45,7 @@ impl ReqContext {
     }
 }
 
-pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
+pub async fn middleware(mut req: Request<Body>, next: Next) -> Response {
     let method = req.method().to_string();
     let uri = req.uri().to_string();
     let rid = extract_header(req.headers(), "x-request-id", || Uuid::new_v4().to_string());

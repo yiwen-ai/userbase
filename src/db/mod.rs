@@ -41,7 +41,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore]
     fn xid_to_cn_works() {
         assert_eq!(
             xid_to_cn(&xid::Id::from_str(USER_JARVIS).unwrap(), 0).as_str(),
@@ -54,5 +53,11 @@ mod tests {
         let id = xid::new();
         assert_ne!(xid_to_cn(&id, 0), xid_to_cn(&id, 1));
         assert_ne!(xid_to_cn(&id, 0), xid_to_cn(&xid::new(), 0));
+    }
+
+    #[test]
+    fn xid_compare_works() {
+        assert!(xid::Id::from_str(USER_JARVIS).unwrap() < MIN_ID);
+        assert!(xid::Id::from_str(USER_ANON).unwrap() < MIN_ID);
     }
 }

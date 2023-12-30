@@ -1,10 +1,13 @@
 // use hex_literal::hex;
+use sha2::{Digest, Sha256};
+
 use base64ct::{Base64UrlUnpadded, Encoding};
 mod cose_key;
 mod eddsa_token;
 mod encrypt;
 mod kek_session;
 mod mac_id;
+mod mac_state;
 
 pub use cose_key::Key;
 pub use coset::iana;
@@ -12,6 +15,7 @@ pub use eddsa_token::{Cwt, Token};
 pub use encrypt::Encrypt0;
 pub use kek_session::Session;
 pub use mac_id::MacId;
+pub use mac_state::{ClaimsSet, MacState, Timestamp};
 
 // https://www.rfc-editor.org/rfc/rfc8949.html#name-self-described-cbor
 pub const CBOR_TAG: [u8; 3] = [0xd9, 0xd9, 0xf7];
@@ -21,7 +25,13 @@ pub fn base64url_encode(data: &[u8]) -> String {
 }
 
 pub fn base64url_decode(data: &str) -> anyhow::Result<Vec<u8>> {
-    Base64UrlUnpadded::decode_vec(data).map_err(anyhow::Error::msg)
+    Base64UrlUnpadded::decode_vec(data.trim_end_matches('=')).map_err(anyhow::Error::msg)
+}
+
+pub fn sha_256(data: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.finalize().into()
 }
 
 pub fn wrap_cbor_tag(data: &[u8]) -> Vec<u8> {

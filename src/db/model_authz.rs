@@ -263,8 +263,9 @@ mod tests {
 
     async fn get_db() -> &'static db::scylladb::ScyllaDB {
         DB.get_or_init(|| async {
-            let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
-            let res = db::scylladb::ScyllaDB::new(cfg.scylla, "userbase_test").await;
+            let mut cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
+            cfg.scylla.keyspace = "userbase_test".to_string();
+            let res = db::scylladb::ScyllaDB::new(cfg.scylla).await;
             res.unwrap()
         })
         .await

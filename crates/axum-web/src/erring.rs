@@ -5,7 +5,7 @@ use axum::{
 };
 use scylla::transport::query_result::SingleRowError;
 use serde::{Deserialize, Serialize};
-use std::{convert::From, error::Error, fmt, fmt::Debug};
+use std::{convert::From, error::Error, fmt, fmt::Debug, string::ToString};
 use validator::{ValidationError, ValidationErrors};
 
 use crate::object::PackObject;
@@ -101,6 +101,10 @@ impl From<ValidationErrors> for HTTPError {
     fn from(err: ValidationErrors) -> Self {
         HTTPError::new(400, format!("{:?}", err))
     }
+}
+
+pub fn map_bad_request_err(err: impl ToString) -> HTTPError {
+    HTTPError::new(400, err.to_string())
 }
 
 pub fn valid_user(uid: xid::Id) -> Result<(), HTTPError> {

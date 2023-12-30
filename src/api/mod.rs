@@ -5,15 +5,16 @@ use validator::Validate;
 
 use axum_web::object::{cbor_from_slice, cbor_to_vec, PackObject};
 
+use crate::conf;
 use crate::crypto;
 use crate::db;
 
 pub mod authn;
 pub mod group;
 pub mod member;
+pub mod passkey;
 pub mod session;
 pub mod user;
-// pub mod publication_draft;
 
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -22,7 +23,9 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct AppState {
     pub start_at: u64,
     pub session_name_prefix: String,
+    pub passkey: conf::Passkey,
     pub mac_id: Arc<crypto::MacId>,
+    pub mac_state: Arc<crypto::MacState>,
     pub session: Arc<crypto::Session>,
     pub cwt: Arc<crypto::Cwt>,
     pub scylla: Arc<db::scylladb::ScyllaDB>,

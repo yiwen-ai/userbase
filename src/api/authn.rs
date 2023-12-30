@@ -40,6 +40,7 @@ pub struct AuthNLoginOutput {
     pub sub: PackObject<uuid::Uuid>,
     pub session: String,
     pub picture: String,
+    pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_created_at: Option<i64>,
 }
@@ -80,6 +81,7 @@ pub async fn login_or_new(
         }
     }
 
+    let mut name: String = input.user.name.clone();
     let mut picture: String = "".to_string();
     let mut user_created_at: Option<i64> = None;
     let mut doc = db::AuthN::with_pk(input.idp.clone(), input.aud.clone(), input.sub.clone());
@@ -105,6 +107,7 @@ pub async fn login_or_new(
                     "status".to_string(),
                     "rating".to_string(),
                     "kind".to_string(),
+                    "name".to_string(),
                     "picture".to_string(),
                 ],
             )
@@ -116,6 +119,7 @@ pub async fn login_or_new(
                     format!("{} user, id {}", user.status_name(), user.id),
                 ));
             }
+            name = user.name;
             picture = user.picture;
 
             let mut cols = ColumnsMap::new();
@@ -134,6 +138,7 @@ pub async fn login_or_new(
                         "status".to_string(),
                         "rating".to_string(),
                         "kind".to_string(),
+                        "name".to_string(),
                         "picture".to_string(),
                     ],
                 )
@@ -145,6 +150,7 @@ pub async fn login_or_new(
                         format!("{} user, id {}", user.status_name(), user.id),
                     ));
                 }
+                name = user.name;
                 picture = user.picture;
                 doc.uid = user.id;
             } else {
@@ -211,6 +217,7 @@ pub async fn login_or_new(
         uid: to.with(doc.uid),
         sub: to.with(sub),
         session: sess,
+        name,
         picture,
         user_created_at,
     })))

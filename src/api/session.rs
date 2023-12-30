@@ -1,14 +1,11 @@
 use axum::{
     extract::{Query, State},
-    headers::{
-        authorization::{Bearer, Credentials},
-        HeaderValue,
-    },
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::Response,
     Extension,
 };
 use cookie::Cookie;
+use headers::authorization::{Bearer, Credentials};
 use serde::{Deserialize, Serialize};
 use std::{convert::From, str::FromStr, sync::Arc};
 use validator::Validate;

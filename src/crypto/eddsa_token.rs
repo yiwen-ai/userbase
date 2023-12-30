@@ -9,6 +9,7 @@ use std::{ops::FnOnce, str::FromStr};
 use axum_web::context::unix_ms;
 
 const CLOCK_SKEW: i64 = 5 * 60; // 5 minutes
+const CTX_KEY: i64 = iana::HEADER_PARAMETER_PRIVATE_USE_MAX - 1;
 
 pub struct Cwt {
     iss: String,
@@ -154,8 +155,9 @@ impl Token {
             },
             issued_at: Some(Timestamp::WholeSeconds(self.iat)),
             cwt_id: Some(self.sid.as_bytes().to_vec()),
+            // 11: Context information of an access token ("ctx": bstr), unassigned.
             rest: vec![(
-                ClaimName::Assigned(iana::CwtClaimName::Ctx),
+                ClaimName::PrivateUse(CTX_KEY),
                 ciborium::value::Value::Bytes(rt),
             )],
         }

@@ -1,14 +1,14 @@
 use futures::{stream::StreamExt, Stream};
 use scylla::{
-    frame::value::{BatchValues, ValueList},
+    serialize::{batch::BatchValues, row::SerializeRow},
     statement::{Consistency, SerialConsistency},
-    transport::{query_result::QueryResult, Compression, ExecutionProfile},
+    transport::{iterator::RowIterator, query_result::QueryResult, Compression, ExecutionProfile},
     CachingSession, Metrics, Session, SessionBuilder,
 };
 use std::{sync::Arc, time::Duration};
 
 pub use scylla::{
-    batch::Batch,
+    batch::{Batch, BatchStatement, BatchType},
     frame::response::result::{ColumnType, Row},
     query::Query,
     Bytes,
@@ -21,7 +21,7 @@ pub struct ScyllaDB {
 }
 
 impl ScyllaDB {
-    pub async fn new(cfg: conf::ScyllaDB, keyspace: &str) -> anyhow::Result<Self> {
+    pub async fn new(cfg: conf::ScyllaDB) -> anyhow::Result<Self> {
         // use tls https://github.com/scylladb/scylla-rust-driver/blob/main/examples/tls.rs
 
         let handle = ExecutionProfile::builder()
@@ -39,8 +39,8 @@ impl ScyllaDB {
             .build()
             .await?;
 
-        if !keyspace.is_empty() {
-            session.use_keyspace(keyspace, false).await?;
+        if !cfg.keyspace.is_empty() {
+            session.use_keyspace(cfg.keyspace, false).await?;
         }
 
         Ok(Self {
@@ -55,7 +55,7 @@ impl ScyllaDB {
     pub async fn execute(
         &self,
         query: impl Into<Query>,
-        params: impl ValueList,
+        params: impl SerializeRow,
     ) -> anyhow::Result<QueryResult> {
         let res = self.session.execute(query, params).await?;
         Ok(res)
@@ -64,7 +64,7 @@ impl ScyllaDB {
     pub async fn execute_iter(
         &self,
         query: impl Into<Query>,
-        params: impl ValueList,
+        params: impl SerializeRow,
     ) -> anyhow::Result<Vec<Row>> {
         let mut rows_stream = self.session.execute_iter(query, params).await?;
 
@@ -76,18 +76,28 @@ impl ScyllaDB {
         Ok(rows)
     }
 
+    pub async fn stream(
+        &self,
+        query: impl Into<Query>,
+        params: impl SerializeRow,
+    ) -> anyhow::Result<RowIterator> {
+        let stream = self.session.execute_iter(query, params).await?;
+        Ok(stream)
+    }
+
     // https://opensource.docs.scylladb.com/master/cql/dml.html#batch-statement
     // BATCH operations are only isolated within a single partition.
     // BATCH with conditions cannot span multiple tables
     pub async fn batch(
         &self,
-        statements: Vec<&str>,
+        batch_type: BatchType,
+        statements: Vec<impl Into<BatchStatement>>,
         values: impl BatchValues,
     ) -> anyhow::Result<QueryResult> {
-        let mut batch: Batch = Default::default();
-        for statement in statements {
-            batch.append_statement(statement);
-        }
+        let batch = Batch::new_with_statements(
+            batch_type,
+            statements.into_iter().map(|s| s.into()).collect(),
+        );
         let res = self.session.batch(&batch, values).await?;
         Ok(res)
     }
@@ -147,8 +157,9 @@ mod tests {
 
     async fn get_db() -> &'static db::scylladb::ScyllaDB {
         DB.get_or_init(|| async {
-            let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
-            let res = db::scylladb::ScyllaDB::new(cfg.scylla, "").await;
+            let mut cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
+            cfg.scylla.keyspace = "".to_string();
+            let res = db::scylladb::ScyllaDB::new(cfg.scylla).await;
             res.unwrap()
         })
         .await

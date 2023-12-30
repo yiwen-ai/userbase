@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use axum::{
-    body::HttpBody,
+    body::Body,
     extract::{FromRequest, FromRequestParts},
     http::{
         header::{self, HeaderMap, HeaderValue},
@@ -8,7 +8,6 @@ use axum::{
         StatusCode,
     },
     response::{IntoResponse, Response},
-    BoxError,
 };
 use base64::{engine::general_purpose, Engine as _};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -509,17 +508,14 @@ where
 }
 
 #[async_trait]
-impl<T, S, B> FromRequest<S, B> for PackObject<T>
+impl<T, S> FromRequest<S> for PackObject<T>
 where
     T: DeserializeOwned + Send + Sync,
-    B: HttpBody + Send + 'static,
-    B::Data: Send,
-    B::Error: Into<BoxError>,
     S: Send + Sync,
 {
     type Rejection = HTTPError;
 
-    async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
         let headers = req.headers();
         let ct = get_content_type(headers).map_err(|ct| {
             HTTPError::new(

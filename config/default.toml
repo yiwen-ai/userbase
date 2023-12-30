@@ -22,6 +22,7 @@ nodes = ["127.0.0.1:9042"]
 username = ""
 # Scylla server password
 password = ""
+keyspace = "userbase_test"
 
 [keys]
 issuer = "https://auth.yiwen.ai"
@@ -36,3 +37,7 @@ TH3RngSk7_vpgSw20JBbO3iT2YoE_1pmujnCGAbKQZyu_5uwRJ8SkOBpOWHl4XSyFvyy
 id_key_file = "./tests/keys/encrypted-direct-id.key"
 session_key_file = "./tests/keys/encrypted-direct-session.key"
 token_key_file = "./tests/keys/encrypted-ed25519-token.key"
+
+[passkey]
+rp_id = "localhost"
+rp_name = "Yiwen AI"

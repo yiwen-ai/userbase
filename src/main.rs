@@ -31,8 +31,10 @@ async fn main() -> anyhow::Result<()> {
         server_env,
         &addr
     );
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .expect("failed to bind");
+    axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(app_state, server_cfg.graceful_shutdown))
         .await?;
 
