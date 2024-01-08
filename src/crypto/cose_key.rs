@@ -27,14 +27,20 @@ impl Key {
     pub fn new_ed25519(kid: &[u8]) -> anyhow::Result<Self> {
         let mut key = [0u8; 32];
         OsRng.fill_bytes(&mut key);
+        Key::ed25519(key, kid)
+    }
 
+    pub fn ed25519(priv_key: [u8; 32], kid: &[u8]) -> anyhow::Result<Self> {
         let mut key = CoseKeyBuilder::new_okp_key()
             .algorithm(iana::Algorithm::EdDSA)
             .param(
                 iana::OkpKeyParameter::Crv as i64,
                 Value::from(iana::EllipticCurve::Ed25519 as i64),
             )
-            .param(iana::OkpKeyParameter::D as i64, Value::Bytes(key.to_vec()));
+            .param(
+                iana::OkpKeyParameter::D as i64,
+                Value::Bytes(priv_key.to_vec()),
+            );
 
         if !kid.is_empty() {
             key = key.key_id(kid.to_vec());

@@ -3,6 +3,7 @@ use sha2::{Digest, Sha256};
 
 use base64ct::{Base64UrlUnpadded, Encoding};
 mod cose_key;
+mod ed25519;
 mod eddsa_token;
 mod encrypt;
 mod kek_session;
@@ -11,6 +12,7 @@ mod mac_state;
 
 pub use cose_key::Key;
 pub use coset::iana;
+pub use ed25519::{derive_ed25519, DerivationPath};
 pub use eddsa_token::{Cwt, Token};
 pub use encrypt::Encrypt0;
 pub use kek_session::Session;

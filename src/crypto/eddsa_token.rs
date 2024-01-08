@@ -12,7 +12,7 @@ const CLOCK_SKEW: i64 = 5 * 60; // 5 minutes
 const CTX_KEY: i64 = iana::HEADER_PARAMETER_PRIVATE_USE_MAX - 1;
 
 pub struct Cwt {
-    iss: String,
+    pub iss: String,
     kid: Vec<u8>,
     aad: Vec<u8>,
     kek: KekAes256,

@@ -9,9 +9,8 @@ use std::{sync::Arc, time::Duration};
 
 pub use scylla::{
     batch::{Batch, BatchStatement, BatchType},
-    frame::response::result::{ColumnType, Row},
+    frame::response::result::Row,
     query::Query,
-    Bytes,
 };
 
 use crate::conf;

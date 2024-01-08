@@ -264,10 +264,10 @@ pub async fn verify_registration(
 
     if let Err(ref err) = res {
         if let Ok(v) = serde_json::to_value(&input) {
-            ctx.set("input", v.into()).await;
+            ctx.set("input", v).await;
         }
-        if let Ok(v) = serde_json::to_value(&err) {
-            ctx.set("error", v.into()).await;
+        if let Ok(v) = serde_json::to_value(err) {
+            ctx.set("error", v).await;
         }
     }
 
@@ -453,10 +453,10 @@ pub async fn verify_authentication(
 
     if let Err(ref err) = res {
         if let Ok(v) = serde_json::to_value(&input) {
-            ctx.set("input", v.into()).await;
+            ctx.set("input", v).await;
         }
-        if let Ok(v) = serde_json::to_value(&err) {
-            ctx.set("error", v.into()).await;
+        if let Ok(v) = serde_json::to_value(err) {
+            ctx.set("error", v).await;
         }
     }
 

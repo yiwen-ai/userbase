@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::{convert::From, sync::Arc};
 use validator::Validate;
 
+use crate::crypto::{derive_ed25519, DerivationPath, Key};
 use crate::db;
 
 use axum_web::context::{unix_ms, ReqContext};
@@ -491,4 +492,34 @@ pub async fn batch_get_info(
         .collect();
 
     Ok(to.with(SuccessResponse::new(output)))
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct UserKeyDerivationInput {
+    pub id: PackObject<xid::Id>,
+    pub path: String,
+}
+
+pub async fn derive_key(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<UserKeyDerivationInput>,
+) -> Result<PackObject<SuccessResponse<Vec<u8>>>, HTTPError> {
+    let (to, input) = to.unpack();
+
+    let uid = *input.id.to_owned();
+    let path: DerivationPath = input
+        .path
+        .parse()
+        .map_err(|_| HTTPError::new(400, format!("invalid path {}", input.path)))?;
+    ctx.set_kvs(vec![
+        ("action", "derive_key".into()),
+        ("uid", uid.to_string().into()),
+    ])
+    .await;
+
+    let seed = app.mac_id.user_key_seed(&uid);
+    let key = derive_ed25519(&seed, &path);
+    let cose_key = Key::ed25519(key.to_bytes(), input.path.as_bytes())?;
+    Ok(to.with(SuccessResponse::new(cose_key.to_vec()?)))
 }

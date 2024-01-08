@@ -83,7 +83,8 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route("/", routing::get(api::user::get).patch(api::user::update))
                 .route("/batch_get_info", routing::post(api::user::batch_get_info))
                 .route("/update_email", routing::patch(api::user::update_email))
-                .route("/update_phone", routing::patch(api::user::update_phone)),
+                .route("/update_phone", routing::patch(api::user::update_phone))
+                .route("/derive_key", routing::post(api::user::derive_key)),
         )
         .nest(
             "/v1/group",
@@ -156,7 +157,6 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
 
 async fn new_app_state(cfg: conf::Conf) -> anyhow::Result<api::AppState> {
     let aad = cfg.keys.aad.as_bytes();
-
     let decryptor = {
         // Should use KMS on production.
         let mkek = std::env::var("YIWEN_MKEK")

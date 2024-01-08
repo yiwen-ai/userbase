@@ -294,6 +294,7 @@ pub async fn renew_token(
     let exp = now + expires_in as i64;
 
     let token = crypto::Token {
+        iss: app.cwt.iss.clone(),
         sub,
         aud,
         exp,

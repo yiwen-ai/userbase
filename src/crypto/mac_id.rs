@@ -36,6 +36,20 @@ impl MacId {
         let id: &[u8; 16] = id.as_bytes();
         id.ct_eq(&digest[..16]).unwrap_u8() == 1u8
     }
+
+    pub fn user_key_seed(&self, uid: &xid::Id) -> [u8; 32] {
+        let mut key = [0u8; 32];
+        key.copy_from_slice(
+            &self
+                .hmac
+                .clone()
+                .chain_update(b"user key seed")
+                .chain_update(uid.as_bytes())
+                .finalize()
+                .into_bytes()[..32],
+        );
+        key
+    }
 }
 
 #[cfg(test)]
